@@ -1,0 +1,297 @@
+openapi: 3.1.0
+info:
+  title: GrantSupport Engine API
+  version: 1.0.0
+  description: >
+    GrantSupport is an open-source, delegated support-access authentication and authorization engine.
+    It enables multi-tenant SaaS applications to issue cryptographically signed, time-bounded,
+    single-use support access tokens to vendor support agents with immutable audit logging.
+  license:
+    name: Apache-2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0.html
+
+servers:
+  - url: http://localhost:8080
+    description: Local Standalone Server
+
+paths:
+  /health:
+    get:
+      summary: Health Check
+      description: Returns the health and operational status of the GrantSupport service.
+      responses:
+        '200':
+          description: Service is healthy and operational
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /api/v1/auth/support/grant:
+    post:
+      summary: Create Delegated Support Grant
+      description: >
+        Called by a customer administrator to delegate temporary, time-bounded access to a vendor support agent.
+        Generates a high-entropy single-use raw support token.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GrantSupportRequest'
+      responses:
+        '201':
+          description: Support grant token created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GrantSupportResponse'
+        '400':
+          $ref: '#/components/responses/RFC7807BadRequest'
+        '401':
+          $ref: '#/components/responses/RFC7807Unauthorized'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
+        '500':
+          $ref: '#/components/responses/RFC7807InternalError'
+
+  /api/v1/auth/support/login:
+    post:
+      summary: Claim Support Grant & Login
+      description: >
+        Called by a vendor support agent to consume a single-use support grant token.
+        Atomically invalidates the token, emits an append-only audit event, and issues a 4-hour RS256 JWT access token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SupportLoginRequest'
+      responses:
+        '200':
+          description: Support grant claimed and session JWT issued
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SupportLoginResponse'
+        '400':
+          $ref: '#/components/responses/RFC7807BadRequest'
+        '401':
+          $ref: '#/components/responses/RFC7807Unauthorized'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
+        '500':
+          $ref: '#/components/responses/RFC7807InternalError'
+
+  /api/v1/auth/support/revoke:
+    post:
+      summary: Revoke Active Support Grants
+      description: >
+        Called by a customer administrator to immediately invalidate all pending or active support grants for their tenant.
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: All active support grants revoked successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StandardSuccessResponse'
+        '401':
+          $ref: '#/components/responses/RFC7807Unauthorized'
+        '500':
+          $ref: '#/components/responses/RFC7807InternalError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: RS256 signed JSON Web Token carrying tenant and role claims.
+    BulletproofEd25519:
+      type: apiKey
+      in: header
+      name: X-Signature
+      description: 5-layer Ed25519 dual-key asymmetric request signature.
+
+  schemas:
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: UP
+        service:
+          type: string
+          example: GrantSupport Engine
+        version:
+          type: string
+          example: v1.0.0
+      required:
+        - status
+        - service
+        - version
+
+    GrantSupportRequest:
+      type: object
+      properties:
+        durationMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          description: Grant TTL window in minutes (1 to 24 hours).
+          example: 60
+        scope:
+          type: string
+          description: Granular permission scope (e.g., FULL_ACCESS, READ_ONLY, BILLING_ONLY).
+          default: FULL_ACCESS
+          example: BILLING_ONLY
+        whitelistedIps:
+          type: array
+          items:
+            type: string
+          description: Optional list of authorized client CIDRs/IPs.
+          example: ["198.51.100.4", "203.0.113.0/24"]
+      required:
+        - durationMinutes
+
+    GrantSupportResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Support access token generated successfully.
+        token:
+          type: string
+          description: High-entropy raw support delegation token to be provided to the support agent.
+          example: "550e8400-e29b-41d4-a716-446655440000_9f83a8b9487c6e12..."
+      required:
+        - success
+        - message
+        - token
+
+    SupportLoginRequest:
+      type: object
+      properties:
+        token:
+          type: string
+          description: The raw support token provided by the customer administrator.
+          example: "550e8400-e29b-41d4-a716-446655440000_9f83a8b9487c6e12..."
+        agentId:
+          type: string
+          format: uuid
+          description: Explicit UUID identifying the support engineer claiming the token.
+          example: "7f4c935b-16d7-4f9e-a8f2-39c4a852b719"
+      required:
+        - token
+        - agentId
+
+    SupportLoginResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Support agent authenticated successfully.
+        institution_id:
+          type: string
+          format: uuid
+          example: "550e8400-e29b-41d4-a716-446655440000"
+        accessToken:
+          type: string
+          description: 4-hour RS256 signed access token for support operations.
+          example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+      required:
+        - success
+        - message
+        - institution_id
+        - accessToken
+
+    StandardSuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        message:
+          type: string
+          example: Operation completed successfully.
+      required:
+        - success
+        - message
+
+    ProblemDetails:
+      type: object
+      description: RFC 7807 Problem Details for HTTP APIs
+      properties:
+        type:
+          type: string
+          format: uri
+          example: "https://grantsupport.dev/errors/validation-failed"
+        title:
+          type: string
+          example: "Validation Failed"
+        status:
+          type: integer
+          example: 400
+        detail:
+          type: string
+          example: "Request payload failed schema validation constraints."
+        instance:
+          type: string
+          example: "/api/v1/auth/support/login"
+        code:
+          type: string
+          example: "VALIDATION_FAILED"
+        correlation_id:
+          type: string
+          example: "req-98f2374b-1234-5678"
+        invalid_params:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+                example: "agentId"
+              reason:
+                type: string
+                example: "field is required"
+      required:
+        - title
+        - status
+        - detail
+
+  responses:
+    RFC7807BadRequest:
+      description: Bad Request (RFC 7807)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    RFC7807Unauthorized:
+      description: Unauthorized (RFC 7807)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    RFC7807TooManyRequests:
+      description: Too Many Requests / Rate Limited (RFC 7807)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'
+    RFC7807InternalError:
+      description: Internal Server Error (RFC 7807)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/ProblemDetails'

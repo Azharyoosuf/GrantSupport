@@ -28,6 +28,8 @@ type AuditEvent struct {
 	Description string `json:"description,omitempty"`
 	// HashChain holds the value of the "hash_chain" field.
 	HashChain string `json:"hash_chain,omitempty"`
+	// Signature holds the value of the "signature" field.
+	Signature string `json:"signature,omitempty"`
 	// CreatedAt holds the value of the "created_at" field.
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	selectValues sql.SelectValues
@@ -38,7 +40,7 @@ func (*AuditEvent) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case auditevent.FieldEventType, auditevent.FieldDescription, auditevent.FieldHashChain:
+		case auditevent.FieldEventType, auditevent.FieldDescription, auditevent.FieldHashChain, auditevent.FieldSignature:
 			values[i] = new(sql.NullString)
 		case auditevent.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -94,6 +96,12 @@ func (ae *AuditEvent) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field hash_chain", values[i])
 			} else if value.Valid {
 				ae.HashChain = value.String
+			}
+		case auditevent.FieldSignature:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field signature", values[i])
+			} else if value.Valid {
+				ae.Signature = value.String
 			}
 		case auditevent.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -151,6 +159,9 @@ func (ae *AuditEvent) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("hash_chain=")
 	builder.WriteString(ae.HashChain)
+	builder.WriteString(", ")
+	builder.WriteString("signature=")
+	builder.WriteString(ae.Signature)
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
 	builder.WriteString(ae.CreatedAt.Format(time.ANSIC))

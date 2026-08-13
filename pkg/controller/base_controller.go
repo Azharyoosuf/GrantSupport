@@ -91,7 +91,7 @@ func WriteRFC7807Error(w http.ResponseWriter, status int, code, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(map[string]any{
-		"type":     "https://tenantpro.io/errors/" + strings.ToLower(code),
+		"type":     "https://grantsupport.io/errors/" + strings.ToLower(code),
 		"title":    code,
 		"status":   status,
 		"detail":   detail,

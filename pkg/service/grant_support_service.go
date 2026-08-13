@@ -11,44 +11,59 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"grantsupport/pkg/cache"
 	"grantsupport/pkg/domain"
+	"grantsupport/pkg/ports"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
+	"grantsupport/pkg/webhook"
 )
 
 var (
 	ErrSupportGrantInvalid = errors.New("SUPPORT_GRANT_INVALID: Invalid or expired support grant token")
 	ErrSupportGrantExpired = errors.New("SUPPORT_GRANT_EXPIRED: Support grant token has expired")
-	ErrLicenseLimitExceeded = errors.New("LICENSE_LIMIT_EXCEEDED: Maximum agent seat limit reached for your plan tier")
 )
 
 type GrantSupportService struct {
-	supportGrantRepo *repository.SupportGrantRepository
-	auditRepo        *repository.SecurityAuditRepository
-	valkey           *cache.ValkeyClient
+	supportGrantRepo  *repository.SupportGrantRepository
+	auditRepo         *repository.SecurityAuditRepository
+	lockStore         ports.LockStore
+	webhookDispatcher *webhook.WebhookDispatcher
 }
 
 func NewGrantSupportService(
 	supportGrantRepo *repository.SupportGrantRepository,
 	auditRepo *repository.SecurityAuditRepository,
-	valkey *cache.ValkeyClient,
+	lockStore ports.LockStore,
 ) *GrantSupportService {
 	return &GrantSupportService{
 		supportGrantRepo: supportGrantRepo,
 		auditRepo:        auditRepo,
-		valkey:           valkey,
+		lockStore:        lockStore,
 	}
 }
 
-// CreateSupportGrant creates a temporary support access token for platform support troubleshooting.
+// SetWebhookDispatcher attaches an optional WebhookDispatcher for lifecycle event notifications.
+func (s *GrantSupportService) SetWebhookDispatcher(d *webhook.WebhookDispatcher) {
+	s.webhookDispatcher = d
+}
+
+// CreateSupportGrant creates a temporary support access token with default FULL_ACCESS scope.
 func (s *GrantSupportService) CreateSupportGrant(ctx context.Context, institutionID, adminUserID uuid.UUID, durationMinutes int) (string, error) {
+	return s.CreateSupportGrantScoped(ctx, institutionID, adminUserID, durationMinutes, "FULL_ACCESS", nil)
+}
+
+// CreateSupportGrantScoped creates a temporary support access token with granular scope and IP restrictions.
+func (s *GrantSupportService) CreateSupportGrantScoped(ctx context.Context, institutionID, adminUserID uuid.UUID, durationMinutes int, scope string, whitelistedIPs []string) (string, error) {
 	if s.supportGrantRepo == nil {
 		return "", errors.New("SUPPORT_GRANT_UNAVAILABLE: SupportGrantRepository not configured")
 	}
 
 	if durationMinutes <= 0 || durationMinutes > 1440 {
 		return "", errors.New("INVALID_DURATION: Support grant duration must be between 1 and 1440 minutes")
+	}
+
+	if scope == "" {
+		scope = "FULL_ACCESS"
 	}
 
 	tokenBytes := make([]byte, 32)
@@ -64,15 +79,17 @@ func (s *GrantSupportService) CreateSupportGrant(ctx context.Context, institutio
 	expiresAt := time.Now().Add(time.Duration(durationMinutes) * time.Minute)
 
 	input := &domain.CreateSupportGrantInput{
-		InstitutionID: institutionID,
-		GrantedByID:   adminUserID,
-		TokenHash:     tokenHash,
-		ExpiresAt:     expiresAt,
+		InstitutionID:  institutionID,
+		GrantedByID:    adminUserID,
+		TokenHash:      tokenHash,
+		ExpiresAt:      expiresAt,
+		Scope:          scope,
+		WhitelistedIPs: whitelistedIPs,
 	}
 
-	if s.valkey != nil && s.valkey.LockService != nil {
+	if s.lockStore != nil {
 		lockKey := fmt.Sprintf("lock:grant:%s", institutionID.String())
-		err := s.valkey.LockService.WithLock(ctx, lockKey, 10*time.Second, func(txCtx context.Context) error {
+		err := s.lockStore.WithLock(ctx, lockKey, 10*time.Second, func(txCtx context.Context) error {
 			_, err := s.supportGrantRepo.CreateSupportGrant(txCtx, input)
 			return err
 		})
@@ -86,7 +103,21 @@ func (s *GrantSupportService) CreateSupportGrant(ctx context.Context, institutio
 	}
 
 	if s.auditRepo != nil {
-		_, _ = s.auditRepo.LogSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_GRANTED", fmt.Sprintf("Support access grant created for %d minutes", durationMinutes), nil)
+		_, _ = s.auditRepo.LogSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_GRANTED", fmt.Sprintf("Support access grant created for %d minutes with scope %s", durationMinutes, scope), nil)
+	}
+
+	if s.webhookDispatcher != nil {
+		s.webhookDispatcher.DispatchAsync(webhook.NewWebhookEvent(
+			"grant.created",
+			institutionID.String(),
+			adminUserID.String(),
+			map[string]any{
+				"duration_minutes": durationMinutes,
+				"scope":            scope,
+				"expires_at":       expiresAt.Unix(),
+				"whitelisted_ips":  whitelistedIPs,
+			},
+		))
 	}
 
 	return rawToken, nil
@@ -94,6 +125,10 @@ func (s *GrantSupportService) CreateSupportGrant(ctx context.Context, institutio
 
 // SupportLogin authenticates a support agent using a valid support grant token and issues an RS256 JWT access token.
 func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string, agentUserID uuid.UUID) (uuid.UUID, string, error) {
+	if agentUserID == uuid.Nil {
+		return uuid.Nil, "", errors.New("AGENT_ID_REQUIRED: Explicit agentId UUID must be provided")
+	}
+
 	parts := strings.Split(rawToken, "_")
 	if len(parts) != 2 {
 		return uuid.Nil, "", ErrSupportGrantInvalid
@@ -117,21 +152,38 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 	}
 
 	if err := s.supportGrantRepo.MarkGrantAsUsed(ctx, grant.ID); err != nil {
+		if errors.Is(err, repository.ErrGrantAlreadyUsed) {
+			return uuid.Nil, "", ErrSupportGrantInvalid
+		}
 		return uuid.Nil, "", fmt.Errorf("failed to consume support grant: %w", err)
 	}
 
 	if s.auditRepo != nil {
-		_, _ = s.auditRepo.LogSecurityEvent(ctx, instID, agentUserID, "SUPPORT_ACCESS_LOGGED_IN", fmt.Sprintf("Support login executed by agent %s via active grant", agentUserID.String()), nil)
+		_, _ = s.auditRepo.LogSecurityEvent(ctx, instID, agentUserID, "SUPPORT_ACCESS_LOGGED_IN", fmt.Sprintf("Support login executed by agent %s via active grant with scope %s", agentUserID.String(), grant.Scope), nil)
 	}
 
-	jwtToken, err := security.GenerateJWT(
+	jwtToken, err := security.GenerateJWTWithScope(
 		agentUserID.String(),
 		instID.String(),
 		"SUPPORT_AGENT",
+		grant.Scope,
 		4*time.Hour,
 	)
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("failed to generate support JWT: %w", err)
+	}
+
+	if s.webhookDispatcher != nil {
+		s.webhookDispatcher.DispatchAsync(webhook.NewWebhookEvent(
+			"grant.claimed",
+			instID.String(),
+			agentUserID.String(),
+			map[string]any{
+				"grant_id": grant.ID.String(),
+				"scope":    grant.Scope,
+				"used_at":  time.Now().Unix(),
+			},
+		))
 	}
 
 	return instID, jwtToken, nil
@@ -149,6 +201,17 @@ func (s *GrantSupportService) RevokeSupportGrant(ctx context.Context, institutio
 
 	if s.auditRepo != nil {
 		_, _ = s.auditRepo.LogSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_REVOKED", "All active support access grants manually revoked by administrator", nil)
+	}
+
+	if s.webhookDispatcher != nil {
+		s.webhookDispatcher.DispatchAsync(webhook.NewWebhookEvent(
+			"grant.revoked",
+			institutionID.String(),
+			adminUserID.String(),
+			map[string]any{
+				"revoked_at": time.Now().Unix(),
+			},
+		))
 	}
 
 	return nil

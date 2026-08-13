@@ -41,6 +41,7 @@ type AuditEventMutation struct {
 	event_type     *string
 	description    *string
 	hash_chain     *string
+	signature      *string
 	created_at     *time.Time
 	clearedFields  map[string]struct{}
 	done           bool
@@ -358,6 +359,55 @@ func (m *AuditEventMutation) ResetHashChain() {
 	delete(m.clearedFields, auditevent.FieldHashChain)
 }
 
+// SetSignature sets the "signature" field.
+func (m *AuditEventMutation) SetSignature(s string) {
+	m.signature = &s
+}
+
+// Signature returns the value of the "signature" field in the mutation.
+func (m *AuditEventMutation) Signature() (r string, exists bool) {
+	v := m.signature
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSignature returns the old "signature" field's value of the AuditEvent entity.
+// If the AuditEvent object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AuditEventMutation) OldSignature(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSignature is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSignature requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSignature: %w", err)
+	}
+	return oldValue.Signature, nil
+}
+
+// ClearSignature clears the value of the "signature" field.
+func (m *AuditEventMutation) ClearSignature() {
+	m.signature = nil
+	m.clearedFields[auditevent.FieldSignature] = struct{}{}
+}
+
+// SignatureCleared returns if the "signature" field was cleared in this mutation.
+func (m *AuditEventMutation) SignatureCleared() bool {
+	_, ok := m.clearedFields[auditevent.FieldSignature]
+	return ok
+}
+
+// ResetSignature resets all changes to the "signature" field.
+func (m *AuditEventMutation) ResetSignature() {
+	m.signature = nil
+	delete(m.clearedFields, auditevent.FieldSignature)
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (m *AuditEventMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -428,7 +478,7 @@ func (m *AuditEventMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AuditEventMutation) Fields() []string {
-	fields := make([]string, 0, 6)
+	fields := make([]string, 0, 7)
 	if m.institution_id != nil {
 		fields = append(fields, auditevent.FieldInstitutionID)
 	}
@@ -443,6 +493,9 @@ func (m *AuditEventMutation) Fields() []string {
 	}
 	if m.hash_chain != nil {
 		fields = append(fields, auditevent.FieldHashChain)
+	}
+	if m.signature != nil {
+		fields = append(fields, auditevent.FieldSignature)
 	}
 	if m.created_at != nil {
 		fields = append(fields, auditevent.FieldCreatedAt)
@@ -465,6 +518,8 @@ func (m *AuditEventMutation) Field(name string) (ent.Value, bool) {
 		return m.Description()
 	case auditevent.FieldHashChain:
 		return m.HashChain()
+	case auditevent.FieldSignature:
+		return m.Signature()
 	case auditevent.FieldCreatedAt:
 		return m.CreatedAt()
 	}
@@ -486,6 +541,8 @@ func (m *AuditEventMutation) OldField(ctx context.Context, name string) (ent.Val
 		return m.OldDescription(ctx)
 	case auditevent.FieldHashChain:
 		return m.OldHashChain(ctx)
+	case auditevent.FieldSignature:
+		return m.OldSignature(ctx)
 	case auditevent.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	}
@@ -532,6 +589,13 @@ func (m *AuditEventMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetHashChain(v)
 		return nil
+	case auditevent.FieldSignature:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSignature(v)
+		return nil
 	case auditevent.FieldCreatedAt:
 		v, ok := value.(time.Time)
 		if !ok {
@@ -575,6 +639,9 @@ func (m *AuditEventMutation) ClearedFields() []string {
 	if m.FieldCleared(auditevent.FieldHashChain) {
 		fields = append(fields, auditevent.FieldHashChain)
 	}
+	if m.FieldCleared(auditevent.FieldSignature) {
+		fields = append(fields, auditevent.FieldSignature)
+	}
 	return fields
 }
 
@@ -594,6 +661,9 @@ func (m *AuditEventMutation) ClearField(name string) error {
 		return nil
 	case auditevent.FieldHashChain:
 		m.ClearHashChain()
+		return nil
+	case auditevent.FieldSignature:
+		m.ClearSignature()
 		return nil
 	}
 	return fmt.Errorf("unknown AuditEvent nullable field %s", name)
@@ -617,6 +687,9 @@ func (m *AuditEventMutation) ResetField(name string) error {
 		return nil
 	case auditevent.FieldHashChain:
 		m.ResetHashChain()
+		return nil
+	case auditevent.FieldSignature:
+		m.ResetSignature()
 		return nil
 	case auditevent.FieldCreatedAt:
 		m.ResetCreatedAt()

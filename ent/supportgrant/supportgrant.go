@@ -33,7 +33,7 @@ const (
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// Table holds the table name of the supportgrant in the database.
-	Table = "SupportGrant"
+	Table = "gs_support_grants"
 )
 
 // Columns holds all SQL columns for supportgrant fields.

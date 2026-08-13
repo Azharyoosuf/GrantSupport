@@ -67,6 +67,20 @@ func (aec *AuditEventCreate) SetNillableHashChain(s *string) *AuditEventCreate {
 	return aec
 }
 
+// SetSignature sets the "signature" field.
+func (aec *AuditEventCreate) SetSignature(s string) *AuditEventCreate {
+	aec.mutation.SetSignature(s)
+	return aec
+}
+
+// SetNillableSignature sets the "signature" field if the given value is not nil.
+func (aec *AuditEventCreate) SetNillableSignature(s *string) *AuditEventCreate {
+	if s != nil {
+		aec.SetSignature(*s)
+	}
+	return aec
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (aec *AuditEventCreate) SetCreatedAt(t time.Time) *AuditEventCreate {
 	aec.mutation.SetCreatedAt(t)
@@ -208,6 +222,10 @@ func (aec *AuditEventCreate) createSpec() (*AuditEvent, *sqlgraph.CreateSpec) {
 	if value, ok := aec.mutation.HashChain(); ok {
 		_spec.SetField(auditevent.FieldHashChain, field.TypeString, value)
 		_node.HashChain = value
+	}
+	if value, ok := aec.mutation.Signature(); ok {
+		_spec.SetField(auditevent.FieldSignature, field.TypeString, value)
+		_node.Signature = value
 	}
 	if value, ok := aec.mutation.CreatedAt(); ok {
 		_spec.SetField(auditevent.FieldCreatedAt, field.TypeTime, value)

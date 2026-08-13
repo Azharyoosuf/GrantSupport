@@ -9,41 +9,42 @@ import (
 )
 
 var (
-	// AuditEventColumns holds the columns for the "AuditEvent" table.
-	AuditEventColumns = []*schema.Column{
+	// GsAuditEventsColumns holds the columns for the "gs_audit_events" table.
+	GsAuditEventsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeUUID},
 		{Name: "institution_id", Type: field.TypeUUID},
 		{Name: "actor_id", Type: field.TypeUUID},
 		{Name: "event_type", Type: field.TypeString},
 		{Name: "description", Type: field.TypeString, Nullable: true},
 		{Name: "hash_chain", Type: field.TypeString, Nullable: true},
+		{Name: "signature", Type: field.TypeString, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime},
 	}
-	// AuditEventTable holds the schema information for the "AuditEvent" table.
-	AuditEventTable = &schema.Table{
-		Name:       "AuditEvent",
-		Columns:    AuditEventColumns,
-		PrimaryKey: []*schema.Column{AuditEventColumns[0]},
+	// GsAuditEventsTable holds the schema information for the "gs_audit_events" table.
+	GsAuditEventsTable = &schema.Table{
+		Name:       "gs_audit_events",
+		Columns:    GsAuditEventsColumns,
+		PrimaryKey: []*schema.Column{GsAuditEventsColumns[0]},
 		Indexes: []*schema.Index{
 			{
 				Name:    "auditevent_institution_id_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{AuditEventColumns[1], AuditEventColumns[6]},
+				Columns: []*schema.Column{GsAuditEventsColumns[1], GsAuditEventsColumns[7]},
 			},
 			{
 				Name:    "auditevent_actor_id",
 				Unique:  false,
-				Columns: []*schema.Column{AuditEventColumns[2]},
+				Columns: []*schema.Column{GsAuditEventsColumns[2]},
 			},
 			{
 				Name:    "auditevent_event_type",
 				Unique:  false,
-				Columns: []*schema.Column{AuditEventColumns[3]},
+				Columns: []*schema.Column{GsAuditEventsColumns[3]},
 			},
 		},
 	}
-	// SupportGrantColumns holds the columns for the "SupportGrant" table.
-	SupportGrantColumns = []*schema.Column{
+	// GsSupportGrantsColumns holds the columns for the "gs_support_grants" table.
+	GsSupportGrantsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeUUID},
 		{Name: "institution_id", Type: field.TypeUUID},
 		{Name: "granted_by_id", Type: field.TypeUUID},
@@ -55,24 +56,24 @@ var (
 		{Name: "whitelisted_ips", Type: field.TypeJSON, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime},
 	}
-	// SupportGrantTable holds the schema information for the "SupportGrant" table.
-	SupportGrantTable = &schema.Table{
-		Name:       "SupportGrant",
-		Columns:    SupportGrantColumns,
-		PrimaryKey: []*schema.Column{SupportGrantColumns[0]},
+	// GsSupportGrantsTable holds the schema information for the "gs_support_grants" table.
+	GsSupportGrantsTable = &schema.Table{
+		Name:       "gs_support_grants",
+		Columns:    GsSupportGrantsColumns,
+		PrimaryKey: []*schema.Column{GsSupportGrantsColumns[0]},
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
-		AuditEventTable,
-		SupportGrantTable,
+		GsAuditEventsTable,
+		GsSupportGrantsTable,
 	}
 )
 
 func init() {
-	AuditEventTable.Annotation = &entsql.Annotation{
-		Table: "AuditEvent",
+	GsAuditEventsTable.Annotation = &entsql.Annotation{
+		Table: "gs_audit_events",
 	}
-	SupportGrantTable.Annotation = &entsql.Annotation{
-		Table: "SupportGrant",
+	GsSupportGrantsTable.Annotation = &entsql.Annotation{
+		Table: "gs_support_grants",
 	}
 }

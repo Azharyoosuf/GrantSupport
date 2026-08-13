@@ -7,18 +7,21 @@ import (
 
 // Config holds environment configurations for database, caching, queues, KMS encryption, and server ports.
 type Config struct {
-	DatabaseURL        string
-	ValkeyCacheURL     string
-	ValkeyQueueURL     string
-	Port               string
-	Environment        string
-	AWSRegion          string
-	EncryptionProvider string
-	KmsKeyID           string
-	LocalSecretKey     string
-	MasterEncryptionKey string
-	TrustedProxies     []string
+	DatabaseURL            string
+	DatabaseDialect        string
+	ValkeyCacheURL         string
+	ValkeyQueueURL         string
+	Port                   string
+	Environment            string
+	AWSRegion              string
+	EncryptionProvider     string
+	KmsKeyID               string
+	LocalSecretKey         string
+	MasterEncryptionKey    string
+	TrustedProxies         []string
 	EnforceStrictIPBinding bool
+	WebhookURL             string
+	WebhookSecret          string
 }
 
 // AppConfig is a global singleton instance of application configuration.
@@ -32,7 +35,12 @@ func init() {
 func LoadConfig() (*Config, error) {
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		dbURL = "postgresql://postgres:password@localhost:5434/homp?sslmode=disable"
+		dbURL = "postgresql://postgres:password@localhost:5432/grantsupport?sslmode=disable"
+	}
+
+	dbDialect := os.Getenv("DATABASE_DIALECT")
+	if dbDialect == "" {
+		dbDialect = "postgres"
 	}
 
 	valkeyCacheURL := os.Getenv("VALKEY_CACHE_URL")
@@ -84,24 +92,30 @@ func LoadConfig() (*Config, error) {
 		if masterKey == "0123456789abcdef0123456789abcdef" || localSecretKey == "0123456789abcdef0123456789abcdef" {
 			panic("CRITICAL_SECURITY_ERROR: Default fallback MASTER_ENCRYPTION_KEY / LOCAL_SECRET_KEY is strictly forbidden in production!")
 		}
-		if dbURL == "postgresql://postgres:password@localhost:5434/homp?sslmode=disable" {
+		if dbURL == "postgresql://postgres:password@localhost:5432/grantsupport?sslmode=disable" {
 			panic("CRITICAL_SECURITY_ERROR: Unencrypted fallback DATABASE_URL with default password is strictly forbidden in production!")
 		}
 	}
 
+	webhookURL := os.Getenv("WEBHOOK_URL")
+	webhookSecret := os.Getenv("WEBHOOK_SECRET")
+
 	cfg := &Config{
-		DatabaseURL:        dbURL,
-		ValkeyCacheURL:     valkeyCacheURL,
-		ValkeyQueueURL:     valkeyQueueURL,
-		Port:               port,
-		Environment:        env,
-		AWSRegion:          awsRegion,
-		EncryptionProvider: provider,
-		KmsKeyID:           kmsKeyID,
-		LocalSecretKey:     localSecretKey,
-		MasterEncryptionKey: masterKey,
-		TrustedProxies:     []string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+		DatabaseURL:            dbURL,
+		DatabaseDialect:        dbDialect,
+		ValkeyCacheURL:         valkeyCacheURL,
+		ValkeyQueueURL:         valkeyQueueURL,
+		Port:                   port,
+		Environment:            env,
+		AWSRegion:              awsRegion,
+		EncryptionProvider:     provider,
+		KmsKeyID:               kmsKeyID,
+		LocalSecretKey:         localSecretKey,
+		MasterEncryptionKey:    masterKey,
+		TrustedProxies:         []string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
 		EnforceStrictIPBinding: strictIP,
+		WebhookURL:             webhookURL,
+		WebhookSecret:          webhookSecret,
 	}
 
 	AppConfig = cfg

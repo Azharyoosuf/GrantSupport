@@ -6,8 +6,8 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema"
-	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
+	"entgo.io/ent/schema/index"
 	"github.com/google/uuid"
 )
 
@@ -19,7 +19,7 @@ type AuditEvent struct {
 // Annotations of the AuditEvent.
 func (AuditEvent) Annotations() []schema.Annotation {
 	return []schema.Annotation{
-		entsql.Annotation{Table: "AuditEvent"},
+		entsql.Annotation{Table: "gs_audit_events"},
 	}
 }
 
@@ -28,29 +28,20 @@ func (AuditEvent) Fields() []ent.Field {
 	return []ent.Field{
 		field.UUID("id", uuid.UUID{}).Default(uuid.New),
 		field.UUID("institution_id", uuid.UUID{}),
-		field.String("name"),
-		field.Time("start_date"),
-		field.Time("end_date"),
-		field.String("description").Optional().Nillable(),
-		field.Float("anomaly_multiplier").Default(1.0),
-		field.UUID("created_by_id", uuid.UUID{}),
+		field.UUID("actor_id", uuid.UUID{}),
+		field.String("event_type"),
+		field.String("description").Optional(),
+		field.String("hash_chain").Optional(),
+		field.String("signature").Optional(),
 		field.Time("created_at").Default(time.Now),
-		field.Time("updated_at").Default(time.Now),
 	}
 }
 
-// Edges of the AuditEvent.
-func (AuditEvent) Edges() []ent.Edge {
-	return []ent.Edge{
-		edge.From("institution", Institution.Type).
-			Ref("audit_events").
-			Unique().
-			Field("institution_id").
-			Required(),
-		edge.From("created_by", User.Type).
-			Ref("events_created").
-			Unique().
-			Field("created_by_id").
-			Required(),
+// Indexes of the AuditEvent.
+func (AuditEvent) Indexes() []ent.Index {
+	return []ent.Index{
+		index.Fields("institution_id", "created_at"),
+		index.Fields("actor_id"),
+		index.Fields("event_type"),
 	}
 }

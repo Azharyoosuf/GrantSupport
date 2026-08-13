@@ -2,44 +2,57 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/redis/go-redis/v9"
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
 	"grantsupport/ent"
-
-	pkgctx "grantsupport/pkg/context"
-	pkgdb "grantsupport/pkg/database"
 )
 
-// BaseRepository encapsulates shared connection managers and database wrappers.
+// BaseRepository encapsulates the Ent database client and underlying sql.DB.
 type BaseRepository struct {
-	MasterClient  *ent.Client
-	TenantConnMgr *pkgdb.TenantConnectionManager
-	PgxPool       *pgxpool.Pool
-	Valkey        *redis.Client
+	MasterClient *ent.Client
+	SQLDB        *sql.DB
+	Dialect      string
 }
 
-// NewBaseRepository creates a new BaseRepository instance.
-func NewBaseRepository(masterClient *ent.Client, tenantConnMgr *pkgdb.TenantConnectionManager, pgxPool *pgxpool.Pool, valkey *redis.Client) *BaseRepository {
+// NewBaseRepository creates a new BaseRepository with a direct ent.Client.
+func NewBaseRepository(masterClient *ent.Client) *BaseRepository {
 	return &BaseRepository{
-		MasterClient:  masterClient,
-		TenantConnMgr: tenantConnMgr,
-		PgxPool:       pgxPool,
-		Valkey:        valkey,
+		MasterClient: masterClient,
 	}
 }
 
-// GetClient resolves the correct Ent client for the active tenant context.
-func (r *BaseRepository) GetClient(ctx context.Context) (*ent.Client, error) {
-	tenant, ok := pkgctx.GetTenant(ctx)
-	if !ok || tenant == nil || tenant.InstitutionID == uuid.Nil || tenant.Role == "PLATFORM_OWNER" {
-		// Fallback to MasterClient if context has no tenant or is platform owner
-		return r.MasterClient, nil
+// NewBaseRepositoryWithDB creates a new BaseRepository by wrapping an existing *sql.DB connection pool.
+func NewBaseRepositoryWithDB(db *sql.DB, dialectName string) *BaseRepository {
+	var entDialect string
+	switch dialectName {
+	case "mysql", "mariadb":
+		entDialect = dialect.MySQL
+	case "sqlite", "sqlite3":
+		entDialect = dialect.SQLite
+	default:
+		entDialect = dialect.Postgres
 	}
-	return r.TenantConnMgr.GetClient(ctx, tenant.InstitutionID)
+
+	drv := entsql.OpenDB(entDialect, db)
+	client := ent.NewClient(ent.Driver(drv))
+
+	return &BaseRepository{
+		MasterClient: client,
+		SQLDB:        db,
+		Dialect:      dialectName,
+	}
+}
+
+// GetClient returns the Ent client for database operations.
+func (r *BaseRepository) GetClient(ctx context.Context) (*ent.Client, error) {
+	if r.MasterClient == nil {
+		return nil, fmt.Errorf("master database client not initialized")
+	}
+	return r.MasterClient, nil
 }
 
 // Transaction executes a transactional callback inside an Ent transaction (ent.Tx).
@@ -56,34 +69,6 @@ func (r *BaseRepository) Transaction(ctx context.Context, fn func(tx *ent.Tx) er
 	tx, err := client.Tx(txCtx)
 	if err != nil {
 		return fmt.Errorf("failed to start database transaction: %w", err)
-	}
-
-	// 🛡️ ROW LEVEL SECURITY: Inject active tenant ID into the transaction context.
-	// Set the current institution_id parameter in PostgreSQL local session variables.
-	tenant, ok := pkgctx.GetTenant(ctx)
-	if ok && tenant != nil {
-		if tenant.Role == "PLATFORM_OWNER" {
-			err = tx.ExecRaw(txCtx, "SET LOCAL app.bypass_rls = 'true'")
-			if err != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("failed to set RLS bypass context: %w", err)
-			}
-		} else if tenant.InstitutionID != uuid.Nil {
-			instIDStr := tenant.InstitutionID.String()
-			if _, parseErr := uuid.Parse(instIDStr); parseErr != nil {
-				_ = tx.Rollback()
-				return fmt.Errorf("invalid tenant institution ID format for RLS context: %w", parseErr)
-			}
-			err = tx.ExecRaw(txCtx, "SET LOCAL app.current_institution_id = $1", instIDStr)
-			if err != nil {
-				// Fallback for drivers that do not support parameter binding on SET LOCAL statements
-				err = tx.ExecRaw(txCtx, fmt.Sprintf("SET LOCAL app.current_institution_id = '%s'", instIDStr))
-				if err != nil {
-					_ = tx.Rollback()
-					return fmt.Errorf("failed to set RLS tenant context: %w", err)
-				}
-			}
-		}
 	}
 
 	// Defer recovery to rollback transaction on panic

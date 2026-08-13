@@ -111,6 +111,26 @@ func (aeu *AuditEventUpdate) ClearHashChain() *AuditEventUpdate {
 	return aeu
 }
 
+// SetSignature sets the "signature" field.
+func (aeu *AuditEventUpdate) SetSignature(s string) *AuditEventUpdate {
+	aeu.mutation.SetSignature(s)
+	return aeu
+}
+
+// SetNillableSignature sets the "signature" field if the given value is not nil.
+func (aeu *AuditEventUpdate) SetNillableSignature(s *string) *AuditEventUpdate {
+	if s != nil {
+		aeu.SetSignature(*s)
+	}
+	return aeu
+}
+
+// ClearSignature clears the value of the "signature" field.
+func (aeu *AuditEventUpdate) ClearSignature() *AuditEventUpdate {
+	aeu.mutation.ClearSignature()
+	return aeu
+}
+
 // SetCreatedAt sets the "created_at" field.
 func (aeu *AuditEventUpdate) SetCreatedAt(t time.Time) *AuditEventUpdate {
 	aeu.mutation.SetCreatedAt(t)
@@ -186,6 +206,12 @@ func (aeu *AuditEventUpdate) sqlSave(ctx context.Context) (n int, err error) {
 	}
 	if aeu.mutation.HashChainCleared() {
 		_spec.ClearField(auditevent.FieldHashChain, field.TypeString)
+	}
+	if value, ok := aeu.mutation.Signature(); ok {
+		_spec.SetField(auditevent.FieldSignature, field.TypeString, value)
+	}
+	if aeu.mutation.SignatureCleared() {
+		_spec.ClearField(auditevent.FieldSignature, field.TypeString)
 	}
 	if value, ok := aeu.mutation.CreatedAt(); ok {
 		_spec.SetField(auditevent.FieldCreatedAt, field.TypeTime, value)
@@ -289,6 +315,26 @@ func (aeuo *AuditEventUpdateOne) SetNillableHashChain(s *string) *AuditEventUpda
 // ClearHashChain clears the value of the "hash_chain" field.
 func (aeuo *AuditEventUpdateOne) ClearHashChain() *AuditEventUpdateOne {
 	aeuo.mutation.ClearHashChain()
+	return aeuo
+}
+
+// SetSignature sets the "signature" field.
+func (aeuo *AuditEventUpdateOne) SetSignature(s string) *AuditEventUpdateOne {
+	aeuo.mutation.SetSignature(s)
+	return aeuo
+}
+
+// SetNillableSignature sets the "signature" field if the given value is not nil.
+func (aeuo *AuditEventUpdateOne) SetNillableSignature(s *string) *AuditEventUpdateOne {
+	if s != nil {
+		aeuo.SetSignature(*s)
+	}
+	return aeuo
+}
+
+// ClearSignature clears the value of the "signature" field.
+func (aeuo *AuditEventUpdateOne) ClearSignature() *AuditEventUpdateOne {
+	aeuo.mutation.ClearSignature()
 	return aeuo
 }
 
@@ -397,6 +443,12 @@ func (aeuo *AuditEventUpdateOne) sqlSave(ctx context.Context) (_node *AuditEvent
 	}
 	if aeuo.mutation.HashChainCleared() {
 		_spec.ClearField(auditevent.FieldHashChain, field.TypeString)
+	}
+	if value, ok := aeuo.mutation.Signature(); ok {
+		_spec.SetField(auditevent.FieldSignature, field.TypeString, value)
+	}
+	if aeuo.mutation.SignatureCleared() {
+		_spec.ClearField(auditevent.FieldSignature, field.TypeString)
 	}
 	if value, ok := aeuo.mutation.CreatedAt(); ok {
 		_spec.SetField(auditevent.FieldCreatedAt, field.TypeTime, value)

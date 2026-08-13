@@ -18,7 +18,7 @@ func init() {
 	auditeventFields := schema.AuditEvent{}.Fields()
 	_ = auditeventFields
 	// auditeventDescCreatedAt is the schema descriptor for created_at field.
-	auditeventDescCreatedAt := auditeventFields[6].Descriptor()
+	auditeventDescCreatedAt := auditeventFields[7].Descriptor()
 	// auditevent.DefaultCreatedAt holds the default value on creation for the created_at field.
 	auditevent.DefaultCreatedAt = auditeventDescCreatedAt.Default.(func() time.Time)
 	// auditeventDescID is the schema descriptor for id field.

@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -25,12 +26,20 @@ func (r *SupportGrantRepository) CreateSupportGrant(ctx context.Context, data *d
 		return nil, err
 	}
 
-	grant, err := client.SupportGrant.Create().
+	builder := client.SupportGrant.Create().
 		SetInstitutionID(data.InstitutionID).
 		SetGrantedByID(data.GrantedByID).
 		SetTokenHash(data.TokenHash).
-		SetExpiresAt(data.ExpiresAt).
-		Save(ctx)
+		SetExpiresAt(data.ExpiresAt)
+
+	if data.Scope != "" {
+		builder.SetScope(data.Scope)
+	}
+	if len(data.WhitelistedIPs) > 0 {
+		builder.SetWhitelistedIps(data.WhitelistedIPs)
+	}
+
+	grant, err := builder.Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create support grant: %w", err)
 	}
@@ -69,7 +78,9 @@ func (r *SupportGrantRepository) FindActiveGrantByTokenHash(ctx context.Context,
 	return grant, nil
 }
 
-// MarkGrantAsUsed flags a support grant token as consumed immediately upon first login.
+var ErrGrantAlreadyUsed = errors.New("GRANT_ALREADY_USED: Support grant has already been consumed or is invalid")
+
+// MarkGrantAsUsed flags a support grant token as consumed atomically using a conditional predicate (is_used = false).
 func (r *SupportGrantRepository) MarkGrantAsUsed(ctx context.Context, grantID uuid.UUID) error {
 	client, err := r.GetClient(ctx)
 	if err != nil {
@@ -77,12 +88,19 @@ func (r *SupportGrantRepository) MarkGrantAsUsed(ctx context.Context, grantID uu
 	}
 
 	now := time.Now()
-	_, err = client.SupportGrant.UpdateOneID(grantID).
+	affected, err := client.SupportGrant.Update().
+		Where(
+			supportgrant.ID(grantID),
+			supportgrant.IsUsed(false),
+		).
 		SetIsUsed(true).
 		SetUsedAt(now).
 		Save(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to mark support grant as used: %w", err)
+	}
+	if affected == 0 {
+		return ErrGrantAlreadyUsed
 	}
 	return nil
 }

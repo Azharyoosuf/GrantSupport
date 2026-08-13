@@ -1,0 +1,146 @@
+services:
+  # ==========================================
+  # GrantSupport Service (PostgreSQL Backend)
+  # ==========================================
+  grantsupport-postgres:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grantsupport-postgres
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8080
+      - DATABASE_DIALECT=postgres
+      - DATABASE_URL=postgresql://grantsupport:secretpassword@postgres:5432/grantsupport?sslmode=disable
+      - VALKEY_CACHE_URL=valkey://valkey:6379/0
+      - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY}
+      - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+      - MASTER_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
+      - LOCAL_SECRET_KEY=0123456789abcdef0123456789abcdef
+    depends_on:
+      postgres:
+        condition: service_healthy
+      valkey:
+        condition: service_healthy
+    profiles:
+      - default
+      - postgres
+
+  # ==========================================
+  # GrantSupport Service (MySQL / MariaDB Backend)
+  # ==========================================
+  grantsupport-mysql:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grantsupport-mysql
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8080
+      - DATABASE_DIALECT=mysql
+      - DATABASE_URL=grantsupport:secretpassword@tcp(mysql:3306)/grantsupport?parseTime=true
+      - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY}
+      - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+      - MASTER_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
+      - LOCAL_SECRET_KEY=0123456789abcdef0123456789abcdef
+    depends_on:
+      mysql:
+        condition: service_healthy
+    profiles:
+      - mysql
+
+  # ==========================================
+  # GrantSupport Service (SQLite In-Process Backend)
+  # ==========================================
+  grantsupport-sqlite:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: grantsupport-sqlite
+    restart: unless-stopped
+    ports:
+      - "8082:8080"
+    environment:
+      - ENVIRONMENT=production
+      - PORT=8080
+      - DATABASE_DIALECT=sqlite
+      - DATABASE_URL=file:/data/grantsupport.db?cache=shared&_pragma=foreign_keys(1)&_fk=1&_pragma=busy_timeout(5000)
+      - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY}
+      - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+      - MASTER_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
+      - LOCAL_SECRET_KEY=0123456789abcdef0123456789abcdef
+    volumes:
+      - sqlite_data:/data
+    profiles:
+      - sqlite
+
+  # ==========================================
+  # Databases & Optional Valkey Cache
+  # ==========================================
+  postgres:
+    image: postgres:16-alpine
+    container_name: gs-postgres
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=grantsupport
+      - POSTGRES_PASSWORD=secretpassword
+      - POSTGRES_DB=grantsupport
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U grantsupport"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - default
+      - postgres
+
+  mysql:
+    image: mysql:8.4
+    container_name: gs-mysql
+    restart: unless-stopped
+    environment:
+      - MYSQL_ROOT_PASSWORD=rootsecret
+      - MYSQL_DATABASE=grantsupport
+      - MYSQL_USER=grantsupport
+      - MYSQL_PASSWORD=secretpassword
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "grantsupport", "-psecretpassword"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - mysql
+
+  valkey:
+    image: valkey/valkey:7.2-alpine
+    container_name: gs-valkey
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "valkey-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - default
+      - postgres
+
+volumes:
+  postgres_data:
+  mysql_data:
+  sqlite_data:

@@ -10,7 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"grantsupport/pkg/cache"
+	"github.com/google/uuid"
+	"grantsupport/pkg/adapters/replay"
 	"grantsupport/pkg/middleware"
 	"grantsupport/pkg/security"
 )
@@ -27,18 +28,19 @@ func TestBulletproofAuthMiddleware(t *testing.T) {
 	keyStore := map[string]*security.APIKeyDetails{
 		keyID: {
 			KeyID:           keyID,
-			InstitutionID:   "11111111-1111-1111-1111-111111111111",
-			PublicKeyBase64: kp.PublicKeyBase64,
+			InstitutionID:   uuid.MustParse("11111111-1111-1111-1111-111111111111"),
+			PublicKeyBase64: kp,
 			WhitelistedIPs:  []string{"127.0.0.1"},
 			IsActive:        true,
 		},
 	}
 
-	// 3. Initialize Valkey client (if available)
-	valkeyClient, _ := cache.NewValkeyClient("redis://127.0.0.1:6379")
+	// 3. Initialize ReplayStore (In-Memory for tests)
+	replayStore := replay.NewMemoryReplayStore(1 * time.Minute)
+	defer replayStore.Close()
 
 	// 4. Instantiate Bulletproof Auth Middleware
-	mw := middleware.BulletproofAuthMiddleware(valkeyClient, keyStore)
+	mw := middleware.BulletproofAuthMiddleware(replayStore, keyStore)
 	testHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status":"success"}`))

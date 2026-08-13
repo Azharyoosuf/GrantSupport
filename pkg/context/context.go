@@ -9,31 +9,43 @@ import (
 type contextKey string
 
 const (
-	tenantIDKey contextKey = "tenant_id"
-	userIDKey   contextKey = "user_id"
-	roleKey     contextKey = "user_role"
+	tenantKey contextKey = "tenant_data"
+	userKey   contextKey = "user_id"
+	roleKey   contextKey = "user_role"
 )
 
-// WithTenant stores institution ID in context.
-func WithTenant(ctx context.Context, tenantID uuid.UUID) context.Context {
-	return context.WithValue(ctx, tenantIDKey, tenantID)
+// TenantData holds the authenticated tenant context for a request.
+type TenantData struct {
+	InstitutionID uuid.UUID
+	UserID        uuid.UUID
+	Role          string
 }
 
-// GetTenant retrieves institution ID from context.
-func GetTenant(ctx context.Context) (uuid.UUID, bool) {
-	val, ok := ctx.Value(tenantIDKey).(uuid.UUID)
+// WithTenant stores TenantData in context.
+func WithTenant(ctx context.Context, tenant *TenantData) context.Context {
+	return context.WithValue(ctx, tenantKey, tenant)
+}
+
+// GetTenant retrieves TenantData from context.
+func GetTenant(ctx context.Context) (*TenantData, bool) {
+	val, ok := ctx.Value(tenantKey).(*TenantData)
 	return val, ok
 }
 
 // WithUser stores user ID in context.
 func WithUser(ctx context.Context, userID uuid.UUID) context.Context {
-	return context.WithValue(ctx, userIDKey, userID)
+	return context.WithValue(ctx, userKey, userID)
 }
 
 // GetUser retrieves user ID from context.
 func GetUser(ctx context.Context) (uuid.UUID, bool) {
-	val, ok := ctx.Value(userIDKey).(uuid.UUID)
-	return val, ok
+	if val, ok := ctx.Value(userKey).(uuid.UUID); ok {
+		return val, true
+	}
+	if tenant, ok := GetTenant(ctx); ok && tenant != nil {
+		return tenant.UserID, true
+	}
+	return uuid.Nil, false
 }
 
 // WithRole stores user role in context.
@@ -43,6 +55,11 @@ func WithRole(ctx context.Context, role string) context.Context {
 
 // GetRole retrieves user role from context.
 func GetRole(ctx context.Context) (string, bool) {
-	val, ok := ctx.Value(roleKey).(string)
-	return val, ok
+	if val, ok := ctx.Value(roleKey).(string); ok {
+		return val, true
+	}
+	if tenant, ok := GetTenant(ctx); ok && tenant != nil {
+		return tenant.Role, true
+	}
+	return "", false
 }

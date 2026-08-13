@@ -6,7 +6,6 @@ import (
 	"entgo.io/ent"
 	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema"
-	"entgo.io/ent/schema/edge"
 	"entgo.io/ent/schema/field"
 	"github.com/google/uuid"
 )
@@ -19,7 +18,7 @@ type SupportGrant struct {
 // Annotations of the SupportGrant.
 func (SupportGrant) Annotations() []schema.Annotation {
 	return []schema.Annotation{
-		entsql.Annotation{Table: "SupportGrant"},
+		entsql.Annotation{Table: "gs_support_grants"},
 	}
 }
 
@@ -36,21 +35,5 @@ func (SupportGrant) Fields() []ent.Field {
 		field.String("scope").Default("FULL_ACCESS"),
 		field.JSON("whitelisted_ips", []string{}).Optional(),
 		field.Time("created_at").Default(time.Now),
-	}
-}
-
-// Edges of the SupportGrant.
-func (SupportGrant) Edges() []ent.Edge {
-	return []ent.Edge{
-		edge.From("institution", Institution.Type).
-			Ref("support_grants").
-			Unique().
-			Field("institution_id").
-			Required(),
-		edge.From("granted_by", User.Type).
-			Ref("support_grants_created").
-			Unique().
-			Field("granted_by_id").
-			Required(),
 	}
 }

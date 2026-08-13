@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -12,15 +13,20 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
+	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	"grantsupport/ent"
+	_ "modernc.org/sqlite"
+	"grantsupport/pkg/adapters/lock"
+	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/cache"
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
 	"grantsupport/pkg/middleware"
+	"grantsupport/pkg/ports"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
+	"grantsupport/pkg/webhook"
 )
 
 func main() {
@@ -45,12 +51,39 @@ func main() {
 		}
 	}
 
-	// Initialize Ent ORM Database Master Client
-	dbClient, err := ent.Open("postgres", cfg.DatabaseURL)
+	// Initialize Database Connection Pool based on configured dialect
+	dialectName := cfg.DatabaseDialect
+	if dialectName == "" {
+		dialectName = "postgres"
+	}
+
+	var sqlDB *sql.DB
+	var driverName string
+	switch dialectName {
+	case "sqlite", "sqlite3":
+		driverName = "sqlite"
+	case "mysql", "mariadb":
+		driverName = "mysql"
+	default:
+		driverName = "pgx"
+	}
+
+	sqlDB, err := sql.Open(driverName, cfg.DatabaseURL)
 	if err != nil {
-		slog.Error("Failed to connect to PostgreSQL database", slog.String("error", err.Error()))
+		slog.Error("Failed to open database connection", slog.String("dialect", dialectName), slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+	defer sqlDB.Close()
+
+	// Verify database connectivity
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer pingCancel()
+	if err := sqlDB.PingContext(pingCtx); err != nil {
+		slog.Warn("Database ping check warning", slog.String("dialect", dialectName), slog.String("error", err.Error()))
+	}
+
+	baseRepo := repository.NewBaseRepositoryWithDB(sqlDB, dialectName)
+	dbClient := baseRepo.MasterClient
 	defer dbClient.Close()
 
 	if err := dbClient.Schema.Create(context.Background()); err != nil {
@@ -58,21 +91,38 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize Valkey Cache Client (Optional)
-	var valkeyClient *cache.ValkeyClient
+	// Initialize Capability Adapters (Redis if configured, else SQL/Memory Stores)
+	var lockStore ports.LockStore
+	var revocationStore ports.RevocationStore
+
 	if cfg.ValkeyCacheURL != "" {
-		valkeyClient, err = cache.NewValkeyClient(cfg.ValkeyCacheURL)
+		valkeyClient, err := cache.NewValkeyClient(cfg.ValkeyCacheURL)
 		if err != nil {
-			slog.Warn("Valkey connection bypass (running without distributed cache)", slog.String("error", err.Error()))
+			slog.Warn("Valkey connection bypass (running with SQL/Memory lock & revocation)", slog.String("error", err.Error()))
+			lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
+			revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
+		} else {
+			lockStore = lock.NewRedisLockStore(valkeyClient.Client)
+			revocationStore = revocation.NewRedisRevocationStore(valkeyClient.Client)
+			slog.Info("Valkey distributed cache & locking initialized successfully")
 		}
+	} else {
+		lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
+		revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
 	}
 
-	// Initialize Repositories & Services
-	baseRepo := repository.NewBaseRepository(dbClient, nil, nil)
+	// Initialize Repositories & Services (Standalone single-tenant / dedicated deployment)
 	supportGrantRepo := repository.NewSupportGrantRepository(baseRepo)
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
+	auditRepo.SetLockStore(lockStore)
 
-	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo, valkeyClient)
+	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
+	if cfg.WebhookURL != "" {
+		webhookDispatcher := webhook.NewWebhookDispatcher(cfg.WebhookURL, cfg.WebhookSecret)
+		grantService.SetWebhookDispatcher(webhookDispatcher)
+		slog.Info("Webhook dispatcher initialized", slog.String("url", cfg.WebhookURL))
+	}
+
 	grantController := controller.NewSupportGrantController(grantService)
 
 	// Router Setup
@@ -95,7 +145,7 @@ func main() {
 
 	// Authenticated Customer Admin Delegation Endpoints
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.NewAuthMiddleware(valkeyClient))
+		r.Use(middleware.NewAuthMiddleware(revocationStore))
 		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(grantController.GrantSupport))
 		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(grantController.RevokeSupport))
 	})

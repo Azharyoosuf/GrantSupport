@@ -79,17 +79,23 @@ type CustomClaims struct {
 	UserID        string `json:"user_id"`
 	InstitutionID string `json:"institution_id"`
 	Role          string `json:"role"`
+	Scope         string `json:"scope,omitempty"`
 	TokenVersion  int    `json:"token_version"`
 	jwt.RegisteredClaims
 }
 
 // GenerateJWT creates a new signed RS256 access token.
 func GenerateJWT(userID, institutionID, role string, duration time.Duration) (string, error) {
-	return GenerateJWTWithVersion(userID, institutionID, role, 1, duration)
+	return GenerateJWTWithScope(userID, institutionID, role, "FULL_ACCESS", duration)
 }
 
-// GenerateJWTWithVersion creates a new signed RS256 access token with explicit token version.
-func GenerateJWTWithVersion(userID, institutionID, role string, tokenVersion int, duration time.Duration) (string, error) {
+// GenerateJWTWithScope creates a new signed RS256 access token with explicit scope.
+func GenerateJWTWithScope(userID, institutionID, role, scope string, duration time.Duration) (string, error) {
+	return GenerateJWTWithVersion(userID, institutionID, role, scope, 1, duration)
+}
+
+// GenerateJWTWithVersion creates a new signed RS256 access token with explicit scope and token version.
+func GenerateJWTWithVersion(userID, institutionID, role, scope string, tokenVersion int, duration time.Duration) (string, error) {
 	jwtKeyMutex.RLock()
 	privKey := rsaPrivateKey
 	jwtKeyMutex.RUnlock()
@@ -104,15 +110,20 @@ func GenerateJWTWithVersion(userID, institutionID, role string, tokenVersion int
 		jwtKeyMutex.RUnlock()
 	}
 
+	if scope == "" {
+		scope = "FULL_ACCESS"
+	}
+
 	claims := CustomClaims{
 		UserID:        userID,
 		InstitutionID: institutionID,
 		Role:          role,
+		Scope:         scope,
 		TokenVersion:  tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
-			Issuer:    "TenantPro",
+			Issuer:    "GrantSupport",
 		},
 	}
 

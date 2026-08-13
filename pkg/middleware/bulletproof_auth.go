@@ -15,10 +15,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"grantsupport/pkg/cache"
 	"grantsupport/pkg/config"
 	pkgctx "grantsupport/pkg/context"
 	"grantsupport/pkg/controller"
+	"grantsupport/pkg/ports"
 	"grantsupport/pkg/security"
 )
 
@@ -88,7 +88,7 @@ func ValidateIPWhitelist(clientIP string, whitelistedIPs []string) bool {
 }
 
 // BulletproofAuthMiddleware returns a 5-Layer Security HTTP middleware handler.
-func BulletproofAuthMiddleware(valkeyClient *cache.ValkeyClient, keyStore map[string]*security.APIKeyDetails) func(http.Handler) http.Handler {
+func BulletproofAuthMiddleware(replayStore ports.ReplayStore, keyStore map[string]*security.APIKeyDetails) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Extract Security Headers
@@ -140,23 +140,18 @@ func BulletproofAuthMiddleware(valkeyClient *cache.ValkeyClient, keyStore map[st
 				}
 			}
 
-			// Layer 3: Valkey Nonce Replay Check (Fail-Closed)
-			if valkeyClient == nil || valkeyClient.Client == nil {
-				controller.WriteRFC7807Error(w, http.StatusServiceUnavailable, "SECURITY_CACHE_UNAVAILABLE", "Valkey security cache is required for replay attack protection")
-				return
-			}
+			// Layer 3: Nonce Replay Check (Fail-Closed)
+			if replayStore != nil {
+				ttlSeconds := time.Duration(expiresAt-time.Now().Unix()+30) * time.Second
+				if ttlSeconds < 10*time.Second {
+					ttlSeconds = 10 * time.Second
+				}
 
-			nonceKey := fmt.Sprintf("nonce:%s:%s", keyID, nonce)
-			ttlSeconds := time.Duration(expiresAt-time.Now().Unix()+30) * time.Second
-			if ttlSeconds < 10*time.Second {
-				ttlSeconds = 10 * time.Second
-			}
-
-			// Set Valkey key if Not Exists (SETNX)
-			setOk, err := valkeyClient.SetNX(r.Context(), nonceKey, "1", ttlSeconds)
-			if err != nil || !setOk {
-				controller.WriteRFC7807Error(w, http.StatusUnauthorized, "REPLAY_ATTACK_DETECTED", "Duplicate request nonce detected (replay attack blocked)")
-				return
+				setOk, err := replayStore.CheckAndSet(r.Context(), keyID, nonce, ttlSeconds)
+				if err != nil || !setOk {
+					controller.WriteRFC7807Error(w, http.StatusUnauthorized, "REPLAY_ATTACK_DETECTED", "Duplicate request nonce detected (replay attack blocked)")
+					return
+				}
 			}
 
 			// Read request body to construct canonical signature message
@@ -186,20 +181,17 @@ func BulletproofAuthMiddleware(valkeyClient *cache.ValkeyClient, keyStore map[st
 
 			// Layer 5: Inject Tenant Context & Security Context
 			ctx := r.Context()
-			if keyDetails.InstitutionID != "" {
-				instUUID, err := uuid.Parse(keyDetails.InstitutionID)
-				if err == nil {
-					tenantData := &pkgctx.TenantData{
-						InstitutionID: instUUID,
-						Role:          "API_SERVICE",
-					}
-					ctx = pkgctx.WithTenant(ctx, tenantData)
+			if keyDetails.InstitutionID != uuid.Nil {
+				tenantData := &pkgctx.TenantData{
+					InstitutionID: keyDetails.InstitutionID,
+					Role:          "API_SERVICE",
 				}
+				ctx = pkgctx.WithTenant(ctx, tenantData)
 			}
 
 			bctx := &BulletproofSecurityContext{
 				KeyID:         keyID,
-				InstitutionID: keyDetails.InstitutionID,
+				InstitutionID: keyDetails.InstitutionID.String(),
 				ClientIP:      clientIP,
 				ExpiresAt:     expiresAt,
 				PublicKey:     pubKey,
