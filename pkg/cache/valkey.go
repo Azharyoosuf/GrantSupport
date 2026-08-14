@@ -3,6 +3,7 @@ package cache
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -16,7 +17,14 @@ type ValkeyClient struct {
 
 // NewValkeyClient parses the connection DSN and initializes connection pools.
 func NewValkeyClient(dsn string) (*ValkeyClient, error) {
-	opts, err := redis.ParseURL(dsn)
+	normalizedDSN := dsn
+	if strings.HasPrefix(normalizedDSN, "valkeys://") {
+		normalizedDSN = "rediss://" + strings.TrimPrefix(normalizedDSN, "valkeys://")
+	} else if strings.HasPrefix(normalizedDSN, "valkey://") {
+		normalizedDSN = "redis://" + strings.TrimPrefix(normalizedDSN, "valkey://")
+	}
+
+	opts, err := redis.ParseURL(normalizedDSN)
 	if err != nil {
 		return nil, err
 	}
