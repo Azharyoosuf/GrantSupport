@@ -27,6 +27,7 @@ type GrantSupportService struct {
 	supportGrantRepo  *repository.SupportGrantRepository
 	auditRepo         *repository.SecurityAuditRepository
 	lockStore         ports.LockStore
+	revocationStore   ports.RevocationStore
 	webhookDispatcher *webhook.WebhookDispatcher
 }
 
@@ -40,6 +41,11 @@ func NewGrantSupportService(
 		auditRepo:        auditRepo,
 		lockStore:        lockStore,
 	}
+}
+
+// SetRevocationStore attaches a RevocationStore for active session invalidation.
+func (s *GrantSupportService) SetRevocationStore(r ports.RevocationStore) {
+	s.revocationStore = r
 }
 
 // SetWebhookDispatcher attaches an optional WebhookDispatcher for lifecycle event notifications.
@@ -163,7 +169,7 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 		return uuid.Nil, "", ErrSupportGrantInvalid
 	}
 
-	if err := s.supportGrantRepo.MarkGrantAsUsed(ctx, grant.ID); err != nil {
+	if err := s.supportGrantRepo.MarkGrantAsUsed(ctx, grant.ID, agentUserID); err != nil {
 		if errors.Is(err, repository.ErrGrantAlreadyUsed) {
 			return uuid.Nil, "", ErrSupportGrantInvalid
 		}
@@ -174,12 +180,21 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 		_, _ = s.auditRepo.LogSecurityEvent(ctx, grant.InstitutionID, agentUserID, "SUPPORT_ACCESS_LOGGED_IN", fmt.Sprintf("Support login executed by agent %s via active grant with scope %s", agentUserID.String(), grant.Scope), nil)
 	}
 
-	jwtToken, err := security.GenerateJWTWithScope(
+	currentVer := 1
+	if s.revocationStore != nil {
+		if ver, err := s.revocationStore.GetUserTokenVersion(ctx, grant.InstitutionID.String(), agentUserID.String()); err == nil && ver >= 1 {
+			currentVer = ver
+		}
+	}
+
+	// Security/Lifecycle Invariant: The support session cannot outlive the expiration of the grant from which it was issued.
+	jwtToken, err := security.GenerateJWTWithExpiresAt(
 		agentUserID.String(),
 		grant.InstitutionID.String(),
 		"SUPPORT_AGENT",
 		grant.Scope,
-		4*time.Hour,
+		currentVer,
+		grant.ExpiresAt,
 	)
 	if err != nil {
 		return uuid.Nil, "", fmt.Errorf("failed to generate support JWT: %w", err)
@@ -201,18 +216,33 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 	return grant.InstitutionID, jwtToken, nil
 }
 
-// RevokeSupportGrant invalidates all active support grants for an institution.
+// RevokeSupportGrant invalidates all active support grants for an institution and terminates active support-agent sessions.
 func (s *GrantSupportService) RevokeSupportGrant(ctx context.Context, institutionID, adminUserID uuid.UUID) error {
 	if s.supportGrantRepo == nil {
 		return errors.New("SUPPORT_GRANT_UNAVAILABLE: SupportGrantRepository not configured")
 	}
 
-	if err := s.supportGrantRepo.RevokeAllGrantsForInstitution(ctx, institutionID); err != nil {
+	agentIDs, err := s.supportGrantRepo.RevokeAllGrantsForInstitution(ctx, institutionID)
+	if err != nil {
 		return err
 	}
 
+	// Invalidate active JWT sessions for all support agents who claimed grants in this institution
+	if s.revocationStore != nil {
+		for _, agentID := range agentIDs {
+			currentVer := 1
+			if ver, err := s.revocationStore.GetUserTokenVersion(ctx, institutionID.String(), agentID.String()); err == nil && ver >= 1 {
+				currentVer = ver
+			}
+			if err := s.revocationStore.RevokeUserSessions(ctx, institutionID.String(), agentID.String(), currentVer+1); err != nil {
+				return fmt.Errorf("failed to invalidate active support session for agent %s: %w", agentID, err)
+			}
+		}
+	}
+
 	if s.auditRepo != nil {
-		_, _ = s.auditRepo.LogSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_REVOKED", "All active support access grants manually revoked by administrator", nil)
+		desc := fmt.Sprintf("All active support access grants manually revoked by administrator (invalidated %d active support agent session(s))", len(agentIDs))
+		_, _ = s.auditRepo.LogSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_REVOKED", desc, nil)
 	}
 
 	if s.webhookDispatcher != nil {
@@ -221,9 +251,29 @@ func (s *GrantSupportService) RevokeSupportGrant(ctx context.Context, institutio
 			institutionID.String(),
 			adminUserID.String(),
 			map[string]any{
-				"revoked_at": time.Now().Unix(),
+				"revoked_at":           time.Now().Unix(),
+				"sessions_invalidated": len(agentIDs),
 			},
 		))
+	}
+
+	return nil
+}
+
+// SupportLogout terminates an active support agent session by invalidating their token version.
+func (s *GrantSupportService) SupportLogout(ctx context.Context, institutionID, agentUserID uuid.UUID) error {
+	if s.revocationStore != nil {
+		currentVer := 1
+		if ver, err := s.revocationStore.GetUserTokenVersion(ctx, institutionID.String(), agentUserID.String()); err == nil && ver >= 1 {
+			currentVer = ver
+		}
+		if err := s.revocationStore.RevokeUserSessions(ctx, institutionID.String(), agentUserID.String(), currentVer+1); err != nil {
+			return fmt.Errorf("failed to revoke agent session: %w", err)
+		}
+	}
+
+	if s.auditRepo != nil {
+		_, _ = s.auditRepo.LogSecurityEvent(ctx, institutionID, agentUserID, "SUPPORT_ACCESS_LOGGED_OUT", fmt.Sprintf("Support agent %s voluntarily logged out of support session", agentUserID.String()), nil)
 	}
 
 	return nil

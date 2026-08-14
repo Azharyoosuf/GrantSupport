@@ -754,6 +754,7 @@ type SupportGrantMutation struct {
 	id                    *uuid.UUID
 	institution_id        *uuid.UUID
 	granted_by_id         *uuid.UUID
+	used_by_id            *uuid.UUID
 	token_hash            *string
 	expires_at            *time.Time
 	is_used               *bool
@@ -942,6 +943,55 @@ func (m *SupportGrantMutation) OldGrantedByID(ctx context.Context) (v uuid.UUID,
 // ResetGrantedByID resets all changes to the "granted_by_id" field.
 func (m *SupportGrantMutation) ResetGrantedByID() {
 	m.granted_by_id = nil
+}
+
+// SetUsedByID sets the "used_by_id" field.
+func (m *SupportGrantMutation) SetUsedByID(u uuid.UUID) {
+	m.used_by_id = &u
+}
+
+// UsedByID returns the value of the "used_by_id" field in the mutation.
+func (m *SupportGrantMutation) UsedByID() (r uuid.UUID, exists bool) {
+	v := m.used_by_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUsedByID returns the old "used_by_id" field's value of the SupportGrant entity.
+// If the SupportGrant object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *SupportGrantMutation) OldUsedByID(ctx context.Context) (v *uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUsedByID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUsedByID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUsedByID: %w", err)
+	}
+	return oldValue.UsedByID, nil
+}
+
+// ClearUsedByID clears the value of the "used_by_id" field.
+func (m *SupportGrantMutation) ClearUsedByID() {
+	m.used_by_id = nil
+	m.clearedFields[supportgrant.FieldUsedByID] = struct{}{}
+}
+
+// UsedByIDCleared returns if the "used_by_id" field was cleared in this mutation.
+func (m *SupportGrantMutation) UsedByIDCleared() bool {
+	_, ok := m.clearedFields[supportgrant.FieldUsedByID]
+	return ok
+}
+
+// ResetUsedByID resets all changes to the "used_by_id" field.
+func (m *SupportGrantMutation) ResetUsedByID() {
+	m.used_by_id = nil
+	delete(m.clearedFields, supportgrant.FieldUsedByID)
 }
 
 // SetTokenHash sets the "token_hash" field.
@@ -1272,12 +1322,15 @@ func (m *SupportGrantMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *SupportGrantMutation) Fields() []string {
-	fields := make([]string, 0, 9)
+	fields := make([]string, 0, 10)
 	if m.institution_id != nil {
 		fields = append(fields, supportgrant.FieldInstitutionID)
 	}
 	if m.granted_by_id != nil {
 		fields = append(fields, supportgrant.FieldGrantedByID)
+	}
+	if m.used_by_id != nil {
+		fields = append(fields, supportgrant.FieldUsedByID)
 	}
 	if m.token_hash != nil {
 		fields = append(fields, supportgrant.FieldTokenHash)
@@ -1312,6 +1365,8 @@ func (m *SupportGrantMutation) Field(name string) (ent.Value, bool) {
 		return m.InstitutionID()
 	case supportgrant.FieldGrantedByID:
 		return m.GrantedByID()
+	case supportgrant.FieldUsedByID:
+		return m.UsedByID()
 	case supportgrant.FieldTokenHash:
 		return m.TokenHash()
 	case supportgrant.FieldExpiresAt:
@@ -1339,6 +1394,8 @@ func (m *SupportGrantMutation) OldField(ctx context.Context, name string) (ent.V
 		return m.OldInstitutionID(ctx)
 	case supportgrant.FieldGrantedByID:
 		return m.OldGrantedByID(ctx)
+	case supportgrant.FieldUsedByID:
+		return m.OldUsedByID(ctx)
 	case supportgrant.FieldTokenHash:
 		return m.OldTokenHash(ctx)
 	case supportgrant.FieldExpiresAt:
@@ -1375,6 +1432,13 @@ func (m *SupportGrantMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetGrantedByID(v)
+		return nil
+	case supportgrant.FieldUsedByID:
+		v, ok := value.(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUsedByID(v)
 		return nil
 	case supportgrant.FieldTokenHash:
 		v, ok := value.(string)
@@ -1455,6 +1519,9 @@ func (m *SupportGrantMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *SupportGrantMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(supportgrant.FieldUsedByID) {
+		fields = append(fields, supportgrant.FieldUsedByID)
+	}
 	if m.FieldCleared(supportgrant.FieldUsedAt) {
 		fields = append(fields, supportgrant.FieldUsedAt)
 	}
@@ -1475,6 +1542,9 @@ func (m *SupportGrantMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *SupportGrantMutation) ClearField(name string) error {
 	switch name {
+	case supportgrant.FieldUsedByID:
+		m.ClearUsedByID()
+		return nil
 	case supportgrant.FieldUsedAt:
 		m.ClearUsedAt()
 		return nil
@@ -1494,6 +1564,9 @@ func (m *SupportGrantMutation) ResetField(name string) error {
 		return nil
 	case supportgrant.FieldGrantedByID:
 		m.ResetGrantedByID()
+		return nil
+	case supportgrant.FieldUsedByID:
+		m.ResetUsedByID()
 		return nil
 	case supportgrant.FieldTokenHash:
 		m.ResetTokenHash()

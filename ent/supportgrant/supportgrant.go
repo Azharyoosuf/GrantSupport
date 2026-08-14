@@ -18,6 +18,8 @@ const (
 	FieldInstitutionID = "institution_id"
 	// FieldGrantedByID holds the string denoting the granted_by_id field in the database.
 	FieldGrantedByID = "granted_by_id"
+	// FieldUsedByID holds the string denoting the used_by_id field in the database.
+	FieldUsedByID = "used_by_id"
 	// FieldTokenHash holds the string denoting the token_hash field in the database.
 	FieldTokenHash = "token_hash"
 	// FieldExpiresAt holds the string denoting the expires_at field in the database.
@@ -41,6 +43,7 @@ var Columns = []string{
 	FieldID,
 	FieldInstitutionID,
 	FieldGrantedByID,
+	FieldUsedByID,
 	FieldTokenHash,
 	FieldExpiresAt,
 	FieldIsUsed,
@@ -87,6 +90,11 @@ func ByInstitutionID(opts ...sql.OrderTermOption) OrderOption {
 // ByGrantedByID orders the results by the granted_by_id field.
 func ByGrantedByID(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldGrantedByID, opts...).ToFunc()
+}
+
+// ByUsedByID orders the results by the used_by_id field.
+func ByUsedByID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldUsedByID, opts...).ToFunc()
 }
 
 // ByTokenHash orders the results by the token_hash field.

@@ -14,6 +14,9 @@ type RevocationStore interface {
 	// IsTokenRevoked returns true if the token version for the user/institution is older than the current valid version.
 	IsTokenRevoked(ctx context.Context, institutionID, userID string, tokenVersion int) (bool, error)
 
+	// GetUserTokenVersion returns the current minimum valid token version for a user (defaults to 1 if none stored).
+	GetUserTokenVersion(ctx context.Context, institutionID, userID string) (int, error)
+
 	// RevokeUserSessions increments or sets the minimum valid token version for a user, revoking earlier sessions.
 	RevokeUserSessions(ctx context.Context, institutionID, userID string, newVersion int) error
 }

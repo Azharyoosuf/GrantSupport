@@ -109,67 +109,74 @@ func CreateCapabilityTables(ctx context.Context, db *sql.DB, dialect string) err
 		return nil
 	}
 
-	var ddl string
+	var stmts []string
 	switch dialect {
 	case "sqlite", "sqlite3":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key TEXT PRIMARY KEY,
-			owner_token TEXT NOT NULL,
-			expires_at DATETIME NOT NULL,
-			acquired_at DATETIME NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key TEXT PRIMARY KEY,
-			expires_at DATETIME NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id TEXT NOT NULL,
-			user_id TEXT NOT NULL,
-			token_version INTEGER NOT NULL DEFAULT 1,
-			revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (institution_id, user_id)
-		);`
+		stmts = []string{
+			`CREATE TABLE IF NOT EXISTS gs_locks (
+				lock_key TEXT PRIMARY KEY,
+				owner_token TEXT NOT NULL,
+				expires_at DATETIME NOT NULL,
+				acquired_at DATETIME NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS gs_replays (
+				nonce_key TEXT PRIMARY KEY,
+				expires_at DATETIME NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS gs_revocations (
+				institution_id TEXT NOT NULL,
+				user_id TEXT NOT NULL,
+				token_version INTEGER NOT NULL DEFAULT 1,
+				revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (institution_id, user_id)
+			)`,
+		}
 	case "mysql", "mariadb":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key VARCHAR(255) PRIMARY KEY,
-			owner_token VARCHAR(64) NOT NULL,
-			expires_at DATETIME(6) NOT NULL,
-			acquired_at DATETIME(6) NOT NULL
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key VARCHAR(255) PRIMARY KEY,
-			expires_at DATETIME(6) NOT NULL
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id VARCHAR(36) NOT NULL,
-			user_id VARCHAR(36) NOT NULL,
-			token_version INT NOT NULL DEFAULT 1,
-			revoked_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-			PRIMARY KEY (institution_id, user_id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
+		stmts = []string{
+			`CREATE TABLE IF NOT EXISTS gs_locks (
+				lock_key VARCHAR(255) PRIMARY KEY,
+				owner_token VARCHAR(64) NOT NULL,
+				expires_at DATETIME(6) NOT NULL,
+				acquired_at DATETIME(6) NOT NULL
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+			`CREATE TABLE IF NOT EXISTS gs_replays (
+				nonce_key VARCHAR(255) PRIMARY KEY,
+				expires_at DATETIME(6) NOT NULL
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+			`CREATE TABLE IF NOT EXISTS gs_revocations (
+				institution_id VARCHAR(36) NOT NULL,
+				user_id VARCHAR(36) NOT NULL,
+				token_version INT NOT NULL DEFAULT 1,
+				revoked_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+				PRIMARY KEY (institution_id, user_id)
+			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+		}
 	default: // postgres, pgx
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key VARCHAR(255) PRIMARY KEY,
-			owner_token VARCHAR(64) NOT NULL,
-			expires_at TIMESTAMPTZ NOT NULL,
-			acquired_at TIMESTAMPTZ NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key VARCHAR(255) PRIMARY KEY,
-			expires_at TIMESTAMPTZ NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id UUID NOT NULL,
-			user_id UUID NOT NULL,
-			token_version INTEGER NOT NULL DEFAULT 1,
-			revoked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (institution_id, user_id)
-		);`
+		stmts = []string{
+			`CREATE TABLE IF NOT EXISTS gs_locks (
+				lock_key VARCHAR(255) PRIMARY KEY,
+				owner_token VARCHAR(64) NOT NULL,
+				expires_at TIMESTAMPTZ NOT NULL,
+				acquired_at TIMESTAMPTZ NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS gs_replays (
+				nonce_key VARCHAR(255) PRIMARY KEY,
+				expires_at TIMESTAMPTZ NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS gs_revocations (
+				institution_id UUID NOT NULL,
+				user_id UUID NOT NULL,
+				token_version INTEGER NOT NULL DEFAULT 1,
+				revoked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+				PRIMARY KEY (institution_id, user_id)
+			)`,
+		}
 	}
 
-	_, err := db.ExecContext(ctx, ddl)
-	return err
+	for _, stmt := range stmts {
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	return nil
 }

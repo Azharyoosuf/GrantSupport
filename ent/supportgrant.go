@@ -23,6 +23,8 @@ type SupportGrant struct {
 	InstitutionID uuid.UUID `json:"institution_id,omitempty"`
 	// GrantedByID holds the value of the "granted_by_id" field.
 	GrantedByID uuid.UUID `json:"granted_by_id,omitempty"`
+	// UsedByID holds the value of the "used_by_id" field.
+	UsedByID *uuid.UUID `json:"used_by_id,omitempty"`
 	// TokenHash holds the value of the "token_hash" field.
 	TokenHash string `json:"token_hash,omitempty"`
 	// ExpiresAt holds the value of the "expires_at" field.
@@ -45,6 +47,8 @@ func (*SupportGrant) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
+		case supportgrant.FieldUsedByID:
+			values[i] = &sql.NullScanner{S: new(uuid.UUID)}
 		case supportgrant.FieldWhitelistedIps:
 			values[i] = new([]byte)
 		case supportgrant.FieldIsUsed:
@@ -87,6 +91,13 @@ func (sg *SupportGrant) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field granted_by_id", values[i])
 			} else if value != nil {
 				sg.GrantedByID = *value
+			}
+		case supportgrant.FieldUsedByID:
+			if value, ok := values[i].(*sql.NullScanner); !ok {
+				return fmt.Errorf("unexpected type %T for field used_by_id", values[i])
+			} else if value.Valid {
+				sg.UsedByID = new(uuid.UUID)
+				*sg.UsedByID = *value.S.(*uuid.UUID)
 			}
 		case supportgrant.FieldTokenHash:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -174,6 +185,11 @@ func (sg *SupportGrant) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("granted_by_id=")
 	builder.WriteString(fmt.Sprintf("%v", sg.GrantedByID))
+	builder.WriteString(", ")
+	if v := sg.UsedByID; v != nil {
+		builder.WriteString("used_by_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	builder.WriteString("token_hash=")
 	builder.WriteString(sg.TokenHash)

@@ -28,15 +28,15 @@ func init() {
 	supportgrantFields := schema.SupportGrant{}.Fields()
 	_ = supportgrantFields
 	// supportgrantDescIsUsed is the schema descriptor for is_used field.
-	supportgrantDescIsUsed := supportgrantFields[5].Descriptor()
+	supportgrantDescIsUsed := supportgrantFields[6].Descriptor()
 	// supportgrant.DefaultIsUsed holds the default value on creation for the is_used field.
 	supportgrant.DefaultIsUsed = supportgrantDescIsUsed.Default.(bool)
 	// supportgrantDescScope is the schema descriptor for scope field.
-	supportgrantDescScope := supportgrantFields[7].Descriptor()
+	supportgrantDescScope := supportgrantFields[8].Descriptor()
 	// supportgrant.DefaultScope holds the default value on creation for the scope field.
 	supportgrant.DefaultScope = supportgrantDescScope.Default.(string)
 	// supportgrantDescCreatedAt is the schema descriptor for created_at field.
-	supportgrantDescCreatedAt := supportgrantFields[9].Descriptor()
+	supportgrantDescCreatedAt := supportgrantFields[10].Descriptor()
 	// supportgrant.DefaultCreatedAt holds the default value on creation for the created_at field.
 	supportgrant.DefaultCreatedAt = supportgrantDescCreatedAt.Default.(func() time.Time)
 	// supportgrantDescID is the schema descriptor for id field.

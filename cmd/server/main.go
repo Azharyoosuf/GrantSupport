@@ -142,6 +142,7 @@ func main() {
 	auditRepo.SetLockStore(lockStore)
 
 	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
+	grantService.SetRevocationStore(revocationStore)
 	if cfg.WebhookURL != "" {
 		if cfg.WebhookSecret == "" {
 			slog.Warn("Webhook URL configured without WEBHOOK_SECRET: webhook delivery disabled (unsigned webhooks are prohibited)")
@@ -180,6 +181,13 @@ func main() {
 		r.Use(middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"))
 		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(grantController.GrantSupport))
 		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(grantController.RevokeSupport))
+	})
+
+	// Authenticated Support Agent Logout Endpoint
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.NewAuthMiddleware(revocationStore))
+		r.Use(middleware.RequireRoles("SUPPORT_AGENT"))
+		r.Post("/api/v1/auth/support/logout", controller.CatchAsync(grantController.SupportLogout))
 	})
 
 	port := cfg.Port

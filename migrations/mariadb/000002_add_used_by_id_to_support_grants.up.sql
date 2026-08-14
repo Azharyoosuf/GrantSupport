@@ -1,0 +1,3 @@
+-- 000002_add_used_by_id_to_support_grants.up.sql (MariaDB)
+ALTER TABLE gs_support_grants ADD COLUMN IF NOT EXISTS used_by_id VARCHAR(36) NULL;
+CREATE INDEX IF NOT EXISTS idx_gs_support_grants_used_by ON gs_support_grants (institution_id, used_by_id);

@@ -49,7 +49,7 @@ func TestSupportGrantRepositoryNilClient(t *testing.T) {
 		t.Error("Expected error when database client is nil")
 	}
 
-	err = repo.RevokeAllGrantsForInstitution(ctx, uuid.New())
+	_, err = repo.RevokeAllGrantsForInstitution(ctx, uuid.New())
 	if err == nil {
 		t.Error("Expected error when database client is nil")
 	}

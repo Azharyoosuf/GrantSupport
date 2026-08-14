@@ -65,6 +65,11 @@ func GrantedByID(v uuid.UUID) predicate.SupportGrant {
 	return predicate.SupportGrant(sql.FieldEQ(FieldGrantedByID, v))
 }
 
+// UsedByID applies equality check predicate on the "used_by_id" field. It's identical to UsedByIDEQ.
+func UsedByID(v uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldEQ(FieldUsedByID, v))
+}
+
 // TokenHash applies equality check predicate on the "token_hash" field. It's identical to TokenHashEQ.
 func TokenHash(v string) predicate.SupportGrant {
 	return predicate.SupportGrant(sql.FieldEQ(FieldTokenHash, v))
@@ -173,6 +178,56 @@ func GrantedByIDLT(v uuid.UUID) predicate.SupportGrant {
 // GrantedByIDLTE applies the LTE predicate on the "granted_by_id" field.
 func GrantedByIDLTE(v uuid.UUID) predicate.SupportGrant {
 	return predicate.SupportGrant(sql.FieldLTE(FieldGrantedByID, v))
+}
+
+// UsedByIDEQ applies the EQ predicate on the "used_by_id" field.
+func UsedByIDEQ(v uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldEQ(FieldUsedByID, v))
+}
+
+// UsedByIDNEQ applies the NEQ predicate on the "used_by_id" field.
+func UsedByIDNEQ(v uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldNEQ(FieldUsedByID, v))
+}
+
+// UsedByIDIn applies the In predicate on the "used_by_id" field.
+func UsedByIDIn(vs ...uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldIn(FieldUsedByID, vs...))
+}
+
+// UsedByIDNotIn applies the NotIn predicate on the "used_by_id" field.
+func UsedByIDNotIn(vs ...uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldNotIn(FieldUsedByID, vs...))
+}
+
+// UsedByIDGT applies the GT predicate on the "used_by_id" field.
+func UsedByIDGT(v uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldGT(FieldUsedByID, v))
+}
+
+// UsedByIDGTE applies the GTE predicate on the "used_by_id" field.
+func UsedByIDGTE(v uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldGTE(FieldUsedByID, v))
+}
+
+// UsedByIDLT applies the LT predicate on the "used_by_id" field.
+func UsedByIDLT(v uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldLT(FieldUsedByID, v))
+}
+
+// UsedByIDLTE applies the LTE predicate on the "used_by_id" field.
+func UsedByIDLTE(v uuid.UUID) predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldLTE(FieldUsedByID, v))
+}
+
+// UsedByIDIsNil applies the IsNil predicate on the "used_by_id" field.
+func UsedByIDIsNil() predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldIsNull(FieldUsedByID))
+}
+
+// UsedByIDNotNil applies the NotNil predicate on the "used_by_id" field.
+func UsedByIDNotNil() predicate.SupportGrant {
+	return predicate.SupportGrant(sql.FieldNotNull(FieldUsedByID))
 }
 
 // TokenHashEQ applies the EQ predicate on the "token_hash" field.

@@ -28,6 +28,7 @@ func (SupportGrant) Fields() []ent.Field {
 		field.UUID("id", uuid.UUID{}).Default(uuid.New),
 		field.UUID("institution_id", uuid.UUID{}),
 		field.UUID("granted_by_id", uuid.UUID{}),
+		field.UUID("used_by_id", uuid.UUID{}).Optional().Nillable(),
 		field.String("token_hash").Unique(),
 		field.Time("expires_at"),
 		field.Bool("is_used").Default(false),

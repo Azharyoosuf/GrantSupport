@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"entgo.io/ent"
+	"entgo.io/ent/dialect"
 	"entgo.io/ent/dialect/entsql"
 	"entgo.io/ent/schema"
 	"entgo.io/ent/schema/field"
@@ -33,7 +34,12 @@ func (AuditEvent) Fields() []ent.Field {
 		field.String("description").Optional(),
 		field.String("hash_chain").Optional(),
 		field.String("signature").Optional(),
-		field.Time("created_at").Default(time.Now),
+		field.Time("created_at").
+			SchemaType(map[string]string{
+				dialect.MySQL:    "datetime(6)",
+				dialect.Postgres: "timestamptz",
+			}).
+			Default(time.Now),
 	}
 }
 

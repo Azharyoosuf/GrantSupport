@@ -33,6 +33,20 @@ func (sgc *SupportGrantCreate) SetGrantedByID(u uuid.UUID) *SupportGrantCreate {
 	return sgc
 }
 
+// SetUsedByID sets the "used_by_id" field.
+func (sgc *SupportGrantCreate) SetUsedByID(u uuid.UUID) *SupportGrantCreate {
+	sgc.mutation.SetUsedByID(u)
+	return sgc
+}
+
+// SetNillableUsedByID sets the "used_by_id" field if the given value is not nil.
+func (sgc *SupportGrantCreate) SetNillableUsedByID(u *uuid.UUID) *SupportGrantCreate {
+	if u != nil {
+		sgc.SetUsedByID(*u)
+	}
+	return sgc
+}
+
 // SetTokenHash sets the "token_hash" field.
 func (sgc *SupportGrantCreate) SetTokenHash(s string) *SupportGrantCreate {
 	sgc.mutation.SetTokenHash(s)
@@ -239,6 +253,10 @@ func (sgc *SupportGrantCreate) createSpec() (*SupportGrant, *sqlgraph.CreateSpec
 	if value, ok := sgc.mutation.GrantedByID(); ok {
 		_spec.SetField(supportgrant.FieldGrantedByID, field.TypeUUID, value)
 		_node.GrantedByID = value
+	}
+	if value, ok := sgc.mutation.UsedByID(); ok {
+		_spec.SetField(supportgrant.FieldUsedByID, field.TypeUUID, value)
+		_node.UsedByID = &value
 	}
 	if value, ok := sgc.mutation.TokenHash(); ok {
 		_spec.SetField(supportgrant.FieldTokenHash, field.TypeString, value)

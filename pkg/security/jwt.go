@@ -103,8 +103,8 @@ func GenerateJWTWithScope(userID, institutionID, role, scope string, duration ti
 	return GenerateJWTWithVersion(userID, institutionID, role, scope, 1, duration)
 }
 
-// GenerateJWTWithVersion creates a new signed RS256 access token with explicit scope and token version.
-func GenerateJWTWithVersion(userID, institutionID, role, scope string, tokenVersion int, duration time.Duration) (string, error) {
+// GenerateJWTWithExpiresAt creates a new signed RS256 access token with an explicit expiration timestamp.
+func GenerateJWTWithExpiresAt(userID, institutionID, role, scope string, tokenVersion int, expiresAt time.Time) (string, error) {
 	jwtKeyMutex.RLock()
 	privKey := rsaPrivateKey
 	jwtKeyMutex.RUnlock()
@@ -123,6 +123,7 @@ func GenerateJWTWithVersion(userID, institutionID, role, scope string, tokenVers
 		scope = "FULL_ACCESS"
 	}
 
+	now := time.Now().UTC()
 	claims := CustomClaims{
 		UserID:        userID,
 		InstitutionID: institutionID,
@@ -130,14 +131,19 @@ func GenerateJWTWithVersion(userID, institutionID, role, scope string, tokenVers
 		Scope:         scope,
 		TokenVersion:  tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
-			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(expiresAt.UTC()),
+			IssuedAt:  jwt.NewNumericDate(now),
 			Issuer:    "GrantSupport",
 		},
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, claims)
 	return token.SignedString(privKey)
+}
+
+// GenerateJWTWithVersion creates a new signed RS256 access token with explicit scope and token version.
+func GenerateJWTWithVersion(userID, institutionID, role, scope string, tokenVersion int, duration time.Duration) (string, error) {
+	return GenerateJWTWithExpiresAt(userID, institutionID, role, scope, tokenVersion, time.Now().Add(duration))
 }
 
 // VerifyJWT parses and verifies a signed RS256 JWT token string using the public key.

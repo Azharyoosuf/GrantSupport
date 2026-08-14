@@ -347,6 +347,10 @@ func (m *mockCustomRevocationStore) IsTokenRevoked(ctx context.Context, institut
 	return m.isRevoked, nil
 }
 
+func (m *mockCustomRevocationStore) GetUserTokenVersion(ctx context.Context, institutionID, userID string) (int, error) {
+	return 1, nil
+}
+
 func (m *mockCustomRevocationStore) RevokeUserSessions(ctx context.Context, institutionID, userID string, newVersion int) error {
 	m.isRevoked = true
 	return nil

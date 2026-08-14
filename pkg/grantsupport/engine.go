@@ -160,6 +160,7 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	auditRepo.SetLockStore(lockStore)
 
 	grantService := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+	grantService.SetRevocationStore(revocationStore)
 	if webhookDispatcher != nil {
 		grantService.SetWebhookDispatcher(webhookDispatcher)
 	}
@@ -191,9 +192,14 @@ func (e *Engine) SupportLogin(ctx context.Context, rawToken string, agentUserID 
 	return e.grantService.SupportLogin(ctx, rawToken, agentUserID)
 }
 
-// RevokeSupportGrant invalidates all active support access grants for an institution.
+// RevokeSupportGrant invalidates all active support access grants for an institution and terminates active support-agent sessions.
 func (e *Engine) RevokeSupportGrant(ctx context.Context, institutionID, adminUserID uuid.UUID) error {
 	return e.grantService.RevokeSupportGrant(ctx, institutionID, adminUserID)
+}
+
+// SupportLogout voluntarily terminates the authenticated support agent's active session.
+func (e *Engine) SupportLogout(ctx context.Context, institutionID, agentUserID uuid.UUID) error {
+	return e.grantService.SupportLogout(ctx, institutionID, agentUserID)
 }
 
 // VerifyAuditChain cryptographically verifies the SHA-256 hash-chain across all historical events for an institution.
@@ -233,6 +239,13 @@ func (e *Engine) HTTPHandler() http.Handler {
 		r.Use(middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"))
 		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(e.grantController.GrantSupport))
 		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(e.grantController.RevokeSupport))
+	})
+
+	// Authenticated Support Agent Logout Endpoint
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.NewAuthMiddleware(e.revocationStore))
+		r.Use(middleware.RequireRoles("SUPPORT_AGENT"))
+		r.Post("/api/v1/auth/support/logout", controller.CatchAsync(e.grantController.SupportLogout))
 	})
 
 	return r

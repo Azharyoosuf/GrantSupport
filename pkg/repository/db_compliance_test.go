@@ -235,7 +235,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	}
 
 	// 9. Tenant Revocation Isolation
-	if err := grantRepo.RevokeAllGrantsForInstitution(ctx, instA); err != nil {
+	if _, err := grantRepo.RevokeAllGrantsForInstitution(ctx, instA); err != nil {
 		t.Fatalf("[%s] RevokeAllGrantsForInstitution failed: %v", dialectName, err)
 	}
 	activeA, _ := grantRepo.FindActiveGrantByTokenHash(ctx, tokenHashA)

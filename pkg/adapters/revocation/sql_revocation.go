@@ -49,6 +49,35 @@ func (s *SQLRevocationStore) IsTokenRevoked(ctx context.Context, institutionID, 
 	return currentVersion > tokenVersion, nil
 }
 
+// GetUserTokenVersion returns the user's current token version from the database (defaults to 1 if no record).
+func (s *SQLRevocationStore) GetUserTokenVersion(ctx context.Context, institutionID, userID string) (int, error) {
+	if s.db == nil {
+		return 0, fmt.Errorf("revocation store not configured: no database connection")
+	}
+
+	var currentVersion int
+	var query string
+	switch s.dialect {
+	case "mysql", "mariadb", "sqlite", "sqlite3":
+		query = "SELECT token_version FROM gs_revocations WHERE institution_id = ? AND user_id = ?"
+	default:
+		query = "SELECT token_version FROM gs_revocations WHERE institution_id = $1 AND user_id = $2"
+	}
+
+	err := s.db.QueryRowContext(ctx, query, institutionID, userID).Scan(&currentVersion)
+	if err == sql.ErrNoRows {
+		return 1, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if currentVersion < 1 {
+		return 1, nil
+	}
+
+	return currentVersion, nil
+}
+
 // RevokeUserSessions updates the minimum valid token version for a user.
 func (s *SQLRevocationStore) RevokeUserSessions(ctx context.Context, institutionID, userID string, newVersion int) error {
 	if s.db == nil {

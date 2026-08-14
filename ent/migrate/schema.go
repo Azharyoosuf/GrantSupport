@@ -18,7 +18,7 @@ var (
 		{Name: "description", Type: field.TypeString, Nullable: true},
 		{Name: "hash_chain", Type: field.TypeString, Nullable: true},
 		{Name: "signature", Type: field.TypeString, Nullable: true},
-		{Name: "created_at", Type: field.TypeTime},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"mysql": "datetime(6)", "postgres": "timestamptz"}},
 	}
 	// GsAuditEventsTable holds the schema information for the "gs_audit_events" table.
 	GsAuditEventsTable = &schema.Table{
@@ -48,6 +48,7 @@ var (
 		{Name: "id", Type: field.TypeUUID},
 		{Name: "institution_id", Type: field.TypeUUID},
 		{Name: "granted_by_id", Type: field.TypeUUID},
+		{Name: "used_by_id", Type: field.TypeUUID, Nullable: true},
 		{Name: "token_hash", Type: field.TypeString, Unique: true},
 		{Name: "expires_at", Type: field.TypeTime},
 		{Name: "is_used", Type: field.TypeBool, Default: false},

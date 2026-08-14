@@ -80,22 +80,27 @@ func (r *SupportGrantRepository) FindActiveGrantByTokenHash(ctx context.Context,
 
 var ErrGrantAlreadyUsed = errors.New("GRANT_ALREADY_USED: Support grant has already been consumed or is invalid")
 
-// MarkGrantAsUsed flags a support grant token as consumed atomically using a conditional predicate (is_used = false).
-func (r *SupportGrantRepository) MarkGrantAsUsed(ctx context.Context, grantID uuid.UUID) error {
+// MarkGrantAsUsed flags a support grant token as consumed atomically using a conditional predicate (is_used = false), recording the redeeming agent user ID.
+func (r *SupportGrantRepository) MarkGrantAsUsed(ctx context.Context, grantID uuid.UUID, agentUserID ...uuid.UUID) error {
 	client, err := r.GetClient(ctx)
 	if err != nil {
 		return err
 	}
 
 	now := time.Now()
-	affected, err := client.SupportGrant.Update().
+	builder := client.SupportGrant.Update().
 		Where(
 			supportgrant.ID(grantID),
 			supportgrant.IsUsed(false),
 		).
 		SetIsUsed(true).
-		SetUsedAt(now).
-		Save(ctx)
+		SetUsedAt(now)
+
+	if len(agentUserID) > 0 && agentUserID[0] != uuid.Nil {
+		builder.SetUsedByID(agentUserID[0])
+	}
+
+	affected, err := builder.Save(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to mark support grant as used: %w", err)
 	}
@@ -105,19 +110,49 @@ func (r *SupportGrantRepository) MarkGrantAsUsed(ctx context.Context, grantID uu
 	return nil
 }
 
-func (r *SupportGrantRepository) RevokeAllGrantsForInstitution(ctx context.Context, institutionID uuid.UUID) error {
+// RevokeAllGrantsForInstitution expires all unredeemed support grants for an institution and returns the distinct agent user IDs whose sessions were active.
+func (r *SupportGrantRepository) RevokeAllGrantsForInstitution(ctx context.Context, institutionID uuid.UUID) ([]uuid.UUID, error) {
 	client, err := r.GetClient(ctx)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// Revoke all by setting expires_at to now
+	// Query active support agent user IDs that consumed grants for this institution
+	// whose grant authorization window has not yet passed (i.e. whose session is still active)
+	now := time.Now()
+	usedGrants, err := client.SupportGrant.Query().
+		Where(
+			supportgrant.InstitutionID(institutionID),
+			supportgrant.IsUsed(true),
+			supportgrant.UsedByIDNotNil(),
+			supportgrant.ExpiresAtGT(now),
+		).
+		Select(supportgrant.FieldUsedByID).
+		All(ctx)
+	if err != nil && !ent.IsNotFound(err) {
+		return nil, fmt.Errorf("failed to query active support grant agents: %w", err)
+	}
+
+	agentMap := make(map[uuid.UUID]struct{})
+	for _, g := range usedGrants {
+		if g.UsedByID != nil && *g.UsedByID != uuid.Nil {
+			agentMap[*g.UsedByID] = struct{}{}
+		}
+	}
+
+	agentIDs := make([]uuid.UUID, 0, len(agentMap))
+	for id := range agentMap {
+		agentIDs = append(agentIDs, id)
+	}
+
+	// Revoke all unredeemed grants by setting expires_at to now
 	_, err = client.SupportGrant.Update().
 		Where(supportgrant.InstitutionID(institutionID)).
 		SetExpiresAt(time.Now()).
 		Save(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to revoke support grants: %w", err)
+		return nil, fmt.Errorf("failed to revoke support grants: %w", err)
 	}
-	return nil
+
+	return agentIDs, nil
 }

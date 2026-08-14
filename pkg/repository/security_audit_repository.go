@@ -102,32 +102,39 @@ func (r *SecurityAuditRepository) logSecurityEventInternal(ctx context.Context, 
 
 	// Sanitize any PII or credentials from the event description before hashing and saving
 	sanitizedDesc := security.SanitizeAuditText(description)
-	now := time.Now()
+
+	// Establish canonical UTC microsecond timestamp
+	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	// Compute previous hash chain link scoped by institution
 	var prevHash string
+	var lastEvent *ent.AuditEvent
 	if tx != nil {
-		lastEvent, _ := tx.AuditEvent.Query().
+		lastEvent, _ = tx.AuditEvent.Query().
 			Where(auditevent.InstitutionID(institutionID)).
-			Order(ent.Desc(auditevent.FieldCreatedAt)).
+			Order(ent.Desc(auditevent.FieldCreatedAt), ent.Desc(auditevent.FieldID)).
 			First(ctx)
-		if lastEvent != nil {
-			prevHash = lastEvent.HashChain
-		}
 	} else if client != nil {
-		lastEvent, _ := client.AuditEvent.Query().
+		lastEvent, _ = client.AuditEvent.Query().
 			Where(auditevent.InstitutionID(institutionID)).
-			Order(ent.Desc(auditevent.FieldCreatedAt)).
+			Order(ent.Desc(auditevent.FieldCreatedAt), ent.Desc(auditevent.FieldID)).
 			First(ctx)
-		if lastEvent != nil {
-			prevHash = lastEvent.HashChain
-		}
 	}
-	if prevHash == "" {
+
+	if lastEvent != nil {
+		prevHash = lastEvent.HashChain
+		// Enforce strict monotonic timestamp ordering within each tenant chain:
+		// If clock skew or sub-microsecond execution causes `now <= lastEvent.CreatedAt`,
+		// advance `now` to strictly succeed `lastEvent.CreatedAt` by at least 1 microsecond.
+		lastEventTime := lastEvent.CreatedAt.UTC().Truncate(time.Microsecond)
+		if !now.After(lastEventTime) {
+			now = lastEventTime.Add(time.Microsecond)
+		}
+	} else {
 		prevHash = "0000000000000000000000000000000000000000000000000000000000000000"
 	}
 
-	// Compute SHA-256 hash chain value
+	// Compute SHA-256 hash chain value using exact canonical timestamp
 	h := sha256.New()
 	h.Write([]byte(fmt.Sprintf("%s:%s:%s:%s:%s:%d", prevHash, institutionID.String(), actorID.String(), eventType, sanitizedDesc, now.UnixNano())))
 	computedHashChain := hex.EncodeToString(h.Sum(nil))
@@ -159,7 +166,7 @@ func (r *SecurityAuditRepository) VerifyAuditChain(ctx context.Context, institut
 
 	events, err := client.AuditEvent.Query().
 		Where(auditevent.InstitutionID(institutionID)).
-		Order(ent.Asc(auditevent.FieldCreatedAt)).
+		Order(ent.Asc(auditevent.FieldCreatedAt), ent.Asc(auditevent.FieldID)).
 		All(ctx)
 	if err != nil {
 		return false, err
@@ -167,8 +174,9 @@ func (r *SecurityAuditRepository) VerifyAuditChain(ctx context.Context, institut
 
 	prevHash := "0000000000000000000000000000000000000000000000000000000000000000"
 	for _, event := range events {
+		eventTime := event.CreatedAt.UTC().Truncate(time.Microsecond)
 		h := sha256.New()
-		h.Write([]byte(fmt.Sprintf("%s:%s:%s:%s:%s:%d", prevHash, event.InstitutionID.String(), event.ActorID.String(), event.EventType, event.Description, event.CreatedAt.UnixNano())))
+		h.Write([]byte(fmt.Sprintf("%s:%s:%s:%s:%s:%d", prevHash, event.InstitutionID.String(), event.ActorID.String(), event.EventType, event.Description, eventTime.UnixNano())))
 		expectedHash := hex.EncodeToString(h.Sum(nil))
 
 		if event.HashChain != expectedHash {
@@ -196,7 +204,7 @@ func (r *SecurityAuditRepository) GetAuditEventsByInstitution(ctx context.Contex
 
 	return client.AuditEvent.Query().
 		Where(auditevent.InstitutionID(institutionID)).
-		Order(ent.Desc(auditevent.FieldCreatedAt)).
+		Order(ent.Desc(auditevent.FieldCreatedAt), ent.Desc(auditevent.FieldID)).
 		Limit(limit).
 		Offset(offset).
 		All(ctx)

@@ -58,6 +58,26 @@ func (sgu *SupportGrantUpdate) SetNillableGrantedByID(u *uuid.UUID) *SupportGran
 	return sgu
 }
 
+// SetUsedByID sets the "used_by_id" field.
+func (sgu *SupportGrantUpdate) SetUsedByID(u uuid.UUID) *SupportGrantUpdate {
+	sgu.mutation.SetUsedByID(u)
+	return sgu
+}
+
+// SetNillableUsedByID sets the "used_by_id" field if the given value is not nil.
+func (sgu *SupportGrantUpdate) SetNillableUsedByID(u *uuid.UUID) *SupportGrantUpdate {
+	if u != nil {
+		sgu.SetUsedByID(*u)
+	}
+	return sgu
+}
+
+// ClearUsedByID clears the value of the "used_by_id" field.
+func (sgu *SupportGrantUpdate) ClearUsedByID() *SupportGrantUpdate {
+	sgu.mutation.ClearUsedByID()
+	return sgu
+}
+
 // SetTokenHash sets the "token_hash" field.
 func (sgu *SupportGrantUpdate) SetTokenHash(s string) *SupportGrantUpdate {
 	sgu.mutation.SetTokenHash(s)
@@ -213,6 +233,12 @@ func (sgu *SupportGrantUpdate) sqlSave(ctx context.Context) (n int, err error) {
 	if value, ok := sgu.mutation.GrantedByID(); ok {
 		_spec.SetField(supportgrant.FieldGrantedByID, field.TypeUUID, value)
 	}
+	if value, ok := sgu.mutation.UsedByID(); ok {
+		_spec.SetField(supportgrant.FieldUsedByID, field.TypeUUID, value)
+	}
+	if sgu.mutation.UsedByIDCleared() {
+		_spec.ClearField(supportgrant.FieldUsedByID, field.TypeUUID)
+	}
 	if value, ok := sgu.mutation.TokenHash(); ok {
 		_spec.SetField(supportgrant.FieldTokenHash, field.TypeString, value)
 	}
@@ -290,6 +316,26 @@ func (sguo *SupportGrantUpdateOne) SetNillableGrantedByID(u *uuid.UUID) *Support
 	if u != nil {
 		sguo.SetGrantedByID(*u)
 	}
+	return sguo
+}
+
+// SetUsedByID sets the "used_by_id" field.
+func (sguo *SupportGrantUpdateOne) SetUsedByID(u uuid.UUID) *SupportGrantUpdateOne {
+	sguo.mutation.SetUsedByID(u)
+	return sguo
+}
+
+// SetNillableUsedByID sets the "used_by_id" field if the given value is not nil.
+func (sguo *SupportGrantUpdateOne) SetNillableUsedByID(u *uuid.UUID) *SupportGrantUpdateOne {
+	if u != nil {
+		sguo.SetUsedByID(*u)
+	}
+	return sguo
+}
+
+// ClearUsedByID clears the value of the "used_by_id" field.
+func (sguo *SupportGrantUpdateOne) ClearUsedByID() *SupportGrantUpdateOne {
+	sguo.mutation.ClearUsedByID()
 	return sguo
 }
 
@@ -477,6 +523,12 @@ func (sguo *SupportGrantUpdateOne) sqlSave(ctx context.Context) (_node *SupportG
 	}
 	if value, ok := sguo.mutation.GrantedByID(); ok {
 		_spec.SetField(supportgrant.FieldGrantedByID, field.TypeUUID, value)
+	}
+	if value, ok := sguo.mutation.UsedByID(); ok {
+		_spec.SetField(supportgrant.FieldUsedByID, field.TypeUUID, value)
+	}
+	if sguo.mutation.UsedByIDCleared() {
+		_spec.ClearField(supportgrant.FieldUsedByID, field.TypeUUID)
 	}
 	if value, ok := sguo.mutation.TokenHash(); ok {
 		_spec.SetField(supportgrant.FieldTokenHash, field.TypeString, value)

@@ -68,3 +68,17 @@ func (c *SupportGrantController) RevokeSupport(w http.ResponseWriter, r *http.Re
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "All support delegations revoked successfully."})
 	return nil
 }
+
+// SupportLogout invalidates the authenticated support agent's active session.
+// POST /api/v1/auth/support/logout
+func (c *SupportGrantController) SupportLogout(w http.ResponseWriter, r *http.Request) error {
+	tenant, ok := pkgctx.GetTenant(r.Context())
+	if !ok || tenant == nil {
+		return NewAppError(http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
+	}
+	if err := c.grantService.SupportLogout(r.Context(), tenant.InstitutionID, tenant.UserID); err != nil {
+		return NewAppError(http.StatusInternalServerError, "LOGOUT_FAILED", err.Error())
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support agent session logged out successfully."})
+	return nil
+}
