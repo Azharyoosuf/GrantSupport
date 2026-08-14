@@ -43,19 +43,13 @@ func GetBulletproofSecurityContext(ctx context.Context) (*BulletproofSecurityCon
 	return bctx, ok
 }
 
-// GetRealClientIP extracts real client IP directly from socket (r.RemoteAddr) or trusted Cloudflare headers.
+// GetRealClientIP extracts real client IP directly from socket or trusted proxy headers.
 func GetRealClientIP(r *http.Request) string {
-	// If CF-Connecting-IP header exists (Cloudflare proxy), use it
-	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
-		return cfIP
+	var trustedProxies []string
+	if config.AppConfig != nil {
+		trustedProxies = config.AppConfig.TrustedProxies
 	}
-
-	// Fall back to direct TCP socket connection remote address (UN-SPOOFABLE over TCP)
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return ExtractClientIP(r, trustedProxies)
 }
 
 // ValidateIPWhitelist verifies if a client IP matches a list of whitelisted IPs or CIDR subnets.

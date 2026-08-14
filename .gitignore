@@ -1,0 +1,47 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+/grantsupport
+
+# Test binary, built with `go test -c`
+*.test
+__debug_bin*
+
+# Output of the go coverage tool
+*.out
+coverage.html
+profile.out
+
+# Local environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# SQLite database local test files
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+Desktop.ini

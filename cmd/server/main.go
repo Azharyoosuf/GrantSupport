@@ -15,8 +15,8 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "modernc.org/sqlite"
 	"grantsupport/pkg/adapters/lock"
+	"grantsupport/pkg/adapters/ratelimit"
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/cache"
 	"grantsupport/pkg/config"
@@ -27,6 +27,7 @@ import (
 	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
 	"grantsupport/pkg/webhook"
+	_ "modernc.org/sqlite"
 )
 
 func main() {
@@ -44,7 +45,11 @@ func main() {
 
 	// Initialize RSA JWT Keys
 	if err := security.LoadJWTKeysFromEnv(); err != nil {
-		slog.Warn("RSA JWT keys not found in environment, generating transient keypair for runtime...")
+		if cfg.Environment == "production" {
+			slog.Error("FATAL: JWT_PRIVATE_KEY and JWT_PUBLIC_KEY are required in production. Exiting.", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		slog.Warn("RSA JWT keys not found, generating transient keypair (development only — NOT safe for production)...")
 		if err := security.SetupTestRSAKeys(); err != nil {
 			slog.Error("Failed to initialize transient JWT keys", slog.String("error", err.Error()))
 			os.Exit(1)
@@ -75,40 +80,60 @@ func main() {
 	}
 	defer sqlDB.Close()
 
-	// Verify database connectivity
-	pingCtx, pingCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// Apply configured database connection pool settings to prevent connection starvation and resource leaks
+	sqlDB.SetMaxOpenConns(cfg.DBMaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.DBMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(cfg.DBConnMaxLifetimeMinutes) * time.Minute)
+	sqlDB.SetConnMaxIdleTime(time.Duration(cfg.DBConnMaxIdleTimeMinutes) * time.Minute)
+
+	// Verify database connectivity (Fail fast on startup if database is unreachable)
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer pingCancel()
 	if err := sqlDB.PingContext(pingCtx); err != nil {
-		slog.Warn("Database ping check warning", slog.String("dialect", dialectName), slog.String("error", err.Error()))
+		slog.Error("FATAL: Failed to establish database connection on startup", slog.String("dialect", dialectName), slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	baseRepo := repository.NewBaseRepositoryWithDB(sqlDB, dialectName)
 	dbClient := baseRepo.MasterClient
 	defer dbClient.Close()
 
-	if err := dbClient.Schema.Create(context.Background()); err != nil {
-		slog.Error("Failed to auto-migrate database schema", slog.String("error", err.Error()))
-		os.Exit(1)
+	if cfg.AutoMigrate {
+		slog.Info("Running development database auto-migration...")
+		if err := dbClient.Schema.Create(context.Background()); err != nil {
+			slog.Error("Failed to auto-migrate database schema", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		if err := repository.CreateCapabilityTables(context.Background(), sqlDB, dialectName); err != nil {
+			slog.Error("Failed to auto-migrate capability tables", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+	} else {
+		slog.Info("Database auto-migration disabled (authoritative versioned SQL migrations enforced)")
 	}
 
 	// Initialize Capability Adapters (Redis if configured, else SQL/Memory Stores)
 	var lockStore ports.LockStore
 	var revocationStore ports.RevocationStore
+	var rateLimiter ports.RateLimiterStore
 
 	if cfg.ValkeyCacheURL != "" {
 		valkeyClient, err := cache.NewValkeyClient(cfg.ValkeyCacheURL)
 		if err != nil {
-			slog.Warn("Valkey connection bypass (running with SQL/Memory lock & revocation)", slog.String("error", err.Error()))
+			slog.Warn("Valkey connection bypass (running with SQL/Memory lock, revocation & rate limiting)", slog.String("error", err.Error()))
 			lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
 			revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
+			rateLimiter = ratelimit.NewMemoryRateLimiter()
 		} else {
 			lockStore = lock.NewRedisLockStore(valkeyClient.Client)
 			revocationStore = revocation.NewRedisRevocationStore(valkeyClient.Client)
-			slog.Info("Valkey distributed cache & locking initialized successfully")
+			rateLimiter = ratelimit.NewRedisRateLimiter(valkeyClient.Client)
+			slog.Info("Valkey distributed cache, locking & rate limiting initialized successfully")
 		}
 	} else {
 		lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
 		revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
+		rateLimiter = ratelimit.NewMemoryRateLimiter()
 	}
 
 	// Initialize Repositories & Services (Standalone single-tenant / dedicated deployment)
@@ -118,9 +143,13 @@ func main() {
 
 	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
 	if cfg.WebhookURL != "" {
-		webhookDispatcher := webhook.NewWebhookDispatcher(cfg.WebhookURL, cfg.WebhookSecret)
-		grantService.SetWebhookDispatcher(webhookDispatcher)
-		slog.Info("Webhook dispatcher initialized", slog.String("url", cfg.WebhookURL))
+		if cfg.WebhookSecret == "" {
+			slog.Warn("Webhook URL configured without WEBHOOK_SECRET: webhook delivery disabled (unsigned webhooks are prohibited)")
+		} else {
+			webhookDispatcher := webhook.NewWebhookDispatcher(cfg.WebhookURL, cfg.WebhookSecret)
+			grantService.SetWebhookDispatcher(webhookDispatcher)
+			slog.Info("Webhook dispatcher initialized", slog.String("url", cfg.WebhookURL))
+		}
 	}
 
 	grantController := controller.NewSupportGrantController(grantService)
@@ -140,12 +169,15 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"UP","service":"GrantSupport Engine","version":"v1.0.0"}`))
 	})
 
-	// Public Support Agent Login Endpoint
-	r.Post("/api/v1/auth/support/login", controller.CatchAsync(grantController.SupportLogin))
+	// Public Support Agent Login Endpoint (Rate limited to 10 attempts per minute per IP)
+	r.With(
+		middleware.RateLimitMiddleware(rateLimiter, 10, 60),
+	).Post("/api/v1/auth/support/login", controller.CatchAsync(grantController.SupportLogin))
 
 	// Authenticated Customer Admin Delegation Endpoints
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.NewAuthMiddleware(revocationStore))
+		r.Use(middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"))
 		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(grantController.GrantSupport))
 		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(grantController.RevokeSupport))
 	})

@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
@@ -39,25 +39,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	}
 
 	// Create capability tables for lock, replay, revocation
-	var ddl string
-	switch dialectName {
-	case "sqlite", "sqlite3":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (lock_key TEXT PRIMARY KEY, owner_token TEXT NOT NULL, expires_at DATETIME NOT NULL, acquired_at DATETIME NOT NULL);
-		CREATE TABLE IF NOT EXISTS gs_replays (nonce_key TEXT PRIMARY KEY, expires_at DATETIME NOT NULL);
-		CREATE TABLE IF NOT EXISTS gs_revocations (institution_id TEXT NOT NULL, user_id TEXT NOT NULL, token_version INTEGER NOT NULL DEFAULT 1, revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (institution_id, user_id));`
-	case "mysql", "mariadb":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (lock_key VARCHAR(255) PRIMARY KEY, owner_token VARCHAR(64) NOT NULL, expires_at DATETIME(6) NOT NULL, acquired_at DATETIME(6) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_replays (nonce_key VARCHAR(255) PRIMARY KEY, expires_at DATETIME(6) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_revocations (institution_id VARCHAR(36) NOT NULL, user_id VARCHAR(36) NOT NULL, token_version INT NOT NULL DEFAULT 1, revoked_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), PRIMARY KEY (institution_id, user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
-	default: // postgres
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (lock_key VARCHAR(255) PRIMARY KEY, owner_token VARCHAR(64) NOT NULL, expires_at TIMESTAMPTZ NOT NULL, acquired_at TIMESTAMPTZ NOT NULL);
-		CREATE TABLE IF NOT EXISTS gs_replays (nonce_key VARCHAR(255) PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL);
-		CREATE TABLE IF NOT EXISTS gs_revocations (institution_id UUID NOT NULL, user_id UUID NOT NULL, token_version INTEGER NOT NULL DEFAULT 1, revoked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (institution_id, user_id));`
-	}
-	if _, err := db.ExecContext(ctx, ddl); err != nil {
+	if err := repository.CreateCapabilityTables(ctx, db, dialectName); err != nil {
 		t.Fatalf("[%s] Capability DDL execution failed: %v", dialectName, err)
 	}
 

@@ -1,7 +1,7 @@
 # GrantSupport Full Source Code Export
 
-- **Export Date**: 2026-08-13
-- **Git Commit**: 0ec7b6a379be0eecfdcd0a86dc06ab59d0709509
+- **Export Date**: 2026-08-14
+- **Git Commit**: e91f10dcff7e2035e0e9fc81d349aa56bc3065d8
 
 ---
 
@@ -23,6 +23,7 @@
 - [pkg/adapters/replay/replay_test.go](#pkg-adapters-replay-replay-test-go)
 - [pkg/adapters/replay/sql_replay.go](#pkg-adapters-replay-sql-replay-go)
 - [pkg/adapters/revocation/redis_revocation.go](#pkg-adapters-revocation-redis-revocation-go)
+- [pkg/adapters/revocation/revocation_test.go](#pkg-adapters-revocation-revocation-test-go)
 - [pkg/adapters/revocation/sql_revocation.go](#pkg-adapters-revocation-sql-revocation-go)
 - [pkg/apierrors/rfc7807.go](#pkg-apierrors-rfc7807-go)
 - [pkg/apierrors/rfc7807_test.go](#pkg-apierrors-rfc7807-test-go)
@@ -33,6 +34,7 @@
 - [pkg/controller/auth_dto.go](#pkg-controller-auth-dto-go)
 - [pkg/controller/auth_support_controller.go](#pkg-controller-auth-support-controller-go)
 - [pkg/controller/base_controller.go](#pkg-controller-base-controller-go)
+- [pkg/controller/base_controller_test.go](#pkg-controller-base-controller-test-go)
 - [pkg/domain/support_grant.go](#pkg-domain-support-grant-go)
 - [pkg/grantsupport/engine.go](#pkg-grantsupport-engine-go)
 - [pkg/grantsupport/engine_test.go](#pkg-grantsupport-engine-test-go)
@@ -41,6 +43,8 @@
 - [pkg/middleware/bulletproof_auth.go](#pkg-middleware-bulletproof-auth-go)
 - [pkg/middleware/bulletproof_auth_test.go](#pkg-middleware-bulletproof-auth-test-go)
 - [pkg/middleware/correlation.go](#pkg-middleware-correlation-go)
+- [pkg/middleware/ratelimit.go](#pkg-middleware-ratelimit-go)
+- [pkg/middleware/ratelimit_test.go](#pkg-middleware-ratelimit-test-go)
 - [pkg/middleware/rbac.go](#pkg-middleware-rbac-go)
 - [pkg/ports/lock.go](#pkg-ports-lock-go)
 - [pkg/ports/rate_limit.go](#pkg-ports-rate-limit-go)
@@ -100,8 +104,17 @@
 - [scripts/archive/extract_grantsupport.py](#scripts-archive-extract-grantsupport-py)
 - [scripts/update_source_exports.py](#scripts-update-source-exports-py)
 
+### .github/workflows/
+- [.github/workflows/ci.yml](#-github-workflows-ci-yml)
+
 ### Root-level files
 - [README.md](#readme-md)
+- [LICENSE](#license)
+- [CONTRIBUTING.md](#contributing-md)
+- [SECURITY.md](#security-md)
+- [CHANGELOG.md](#changelog-md)
+- [.gitignore](#-gitignore)
+- [.dockerignore](#-dockerignore)
 - [Dockerfile](#dockerfile)
 - [docker-compose.yml](#docker-compose-yml)
 - [go.mod](#go-mod)
@@ -129,8 +142,8 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
-	_ "modernc.org/sqlite"
 	"grantsupport/pkg/adapters/lock"
+	"grantsupport/pkg/adapters/ratelimit"
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/cache"
 	"grantsupport/pkg/config"
@@ -141,6 +154,7 @@ import (
 	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
 	"grantsupport/pkg/webhook"
+	_ "modernc.org/sqlite"
 )
 
 func main() {
@@ -158,7 +172,11 @@ func main() {
 
 	// Initialize RSA JWT Keys
 	if err := security.LoadJWTKeysFromEnv(); err != nil {
-		slog.Warn("RSA JWT keys not found in environment, generating transient keypair for runtime...")
+		if cfg.Environment == "production" {
+			slog.Error("FATAL: JWT_PRIVATE_KEY and JWT_PUBLIC_KEY are required in production. Exiting.", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		slog.Warn("RSA JWT keys not found, generating transient keypair (development only — NOT safe for production)...")
 		if err := security.SetupTestRSAKeys(); err != nil {
 			slog.Error("Failed to initialize transient JWT keys", slog.String("error", err.Error()))
 			os.Exit(1)
@@ -189,40 +207,60 @@ func main() {
 	}
 	defer sqlDB.Close()
 
-	// Verify database connectivity
-	pingCtx, pingCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// Apply configured database connection pool settings to prevent connection starvation and resource leaks
+	sqlDB.SetMaxOpenConns(cfg.DBMaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.DBMaxIdleConns)
+	sqlDB.SetConnMaxLifetime(time.Duration(cfg.DBConnMaxLifetimeMinutes) * time.Minute)
+	sqlDB.SetConnMaxIdleTime(time.Duration(cfg.DBConnMaxIdleTimeMinutes) * time.Minute)
+
+	// Verify database connectivity (Fail fast on startup if database is unreachable)
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer pingCancel()
 	if err := sqlDB.PingContext(pingCtx); err != nil {
-		slog.Warn("Database ping check warning", slog.String("dialect", dialectName), slog.String("error", err.Error()))
+		slog.Error("FATAL: Failed to establish database connection on startup", slog.String("dialect", dialectName), slog.String("error", err.Error()))
+		os.Exit(1)
 	}
 
 	baseRepo := repository.NewBaseRepositoryWithDB(sqlDB, dialectName)
 	dbClient := baseRepo.MasterClient
 	defer dbClient.Close()
 
-	if err := dbClient.Schema.Create(context.Background()); err != nil {
-		slog.Error("Failed to auto-migrate database schema", slog.String("error", err.Error()))
-		os.Exit(1)
+	if cfg.AutoMigrate {
+		slog.Info("Running development database auto-migration...")
+		if err := dbClient.Schema.Create(context.Background()); err != nil {
+			slog.Error("Failed to auto-migrate database schema", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+		if err := repository.CreateCapabilityTables(context.Background(), sqlDB, dialectName); err != nil {
+			slog.Error("Failed to auto-migrate capability tables", slog.String("error", err.Error()))
+			os.Exit(1)
+		}
+	} else {
+		slog.Info("Database auto-migration disabled (authoritative versioned SQL migrations enforced)")
 	}
 
 	// Initialize Capability Adapters (Redis if configured, else SQL/Memory Stores)
 	var lockStore ports.LockStore
 	var revocationStore ports.RevocationStore
+	var rateLimiter ports.RateLimiterStore
 
 	if cfg.ValkeyCacheURL != "" {
 		valkeyClient, err := cache.NewValkeyClient(cfg.ValkeyCacheURL)
 		if err != nil {
-			slog.Warn("Valkey connection bypass (running with SQL/Memory lock & revocation)", slog.String("error", err.Error()))
+			slog.Warn("Valkey connection bypass (running with SQL/Memory lock, revocation & rate limiting)", slog.String("error", err.Error()))
 			lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
 			revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
+			rateLimiter = ratelimit.NewMemoryRateLimiter()
 		} else {
 			lockStore = lock.NewRedisLockStore(valkeyClient.Client)
 			revocationStore = revocation.NewRedisRevocationStore(valkeyClient.Client)
-			slog.Info("Valkey distributed cache & locking initialized successfully")
+			rateLimiter = ratelimit.NewRedisRateLimiter(valkeyClient.Client)
+			slog.Info("Valkey distributed cache, locking & rate limiting initialized successfully")
 		}
 	} else {
 		lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
 		revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
+		rateLimiter = ratelimit.NewMemoryRateLimiter()
 	}
 
 	// Initialize Repositories & Services (Standalone single-tenant / dedicated deployment)
@@ -232,9 +270,13 @@ func main() {
 
 	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
 	if cfg.WebhookURL != "" {
-		webhookDispatcher := webhook.NewWebhookDispatcher(cfg.WebhookURL, cfg.WebhookSecret)
-		grantService.SetWebhookDispatcher(webhookDispatcher)
-		slog.Info("Webhook dispatcher initialized", slog.String("url", cfg.WebhookURL))
+		if cfg.WebhookSecret == "" {
+			slog.Warn("Webhook URL configured without WEBHOOK_SECRET: webhook delivery disabled (unsigned webhooks are prohibited)")
+		} else {
+			webhookDispatcher := webhook.NewWebhookDispatcher(cfg.WebhookURL, cfg.WebhookSecret)
+			grantService.SetWebhookDispatcher(webhookDispatcher)
+			slog.Info("Webhook dispatcher initialized", slog.String("url", cfg.WebhookURL))
+		}
 	}
 
 	grantController := controller.NewSupportGrantController(grantService)
@@ -254,12 +296,15 @@ func main() {
 		_, _ = w.Write([]byte(`{"status":"UP","service":"GrantSupport Engine","version":"v1.0.0"}`))
 	})
 
-	// Public Support Agent Login Endpoint
-	r.Post("/api/v1/auth/support/login", controller.CatchAsync(grantController.SupportLogin))
+	// Public Support Agent Login Endpoint (Rate limited to 10 attempts per minute per IP)
+	r.With(
+		middleware.RateLimitMiddleware(rateLimiter, 10, 60),
+	).Post("/api/v1/auth/support/login", controller.CatchAsync(grantController.SupportLogin))
 
 	// Authenticated Customer Admin Delegation Endpoints
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.NewAuthMiddleware(revocationStore))
+		r.Use(middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"))
 		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(grantController.GrantSupport))
 		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(grantController.RevokeSupport))
 	})
@@ -806,6 +851,19 @@ func TestMemoryRateLimiter(t *testing.T) {
 		t.Fatalf("Expected request after window reset to be allowed, got allow=%v, err=%v", allow, err)
 	}
 }
+
+func TestRedisRateLimiter_NilClientFailsClosed(t *testing.T) {
+	limiter := ratelimit.NewRedisRateLimiter(nil)
+	ctx := context.Background()
+
+	allow, err := limiter.Allow(ctx, "ip:127.0.0.1:login", 5, 1*time.Minute)
+	if err == nil {
+		t.Fatal("Expected error from nil Redis client in RedisRateLimiter")
+	}
+	if allow {
+		t.Fatal("Expected allow=false on Redis error (fail-closed)")
+	}
+}
 ```
 
 ---
@@ -835,14 +893,17 @@ func NewRedisRateLimiter(client *redis.Client) *RedisRateLimiter {
 
 // Allow checks if the counter for key is within the limit for the given duration window.
 func (r *RedisRateLimiter) Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error) {
-	if r.client == nil || limit <= 0 {
-		return true, nil // Fail open on rate limiting infrastructure error
+	if limit <= 0 {
+		return true, nil
+	}
+	if r.client == nil {
+		return false, fmt.Errorf("rate limiter unavailable: redis client not configured")
 	}
 
 	rateKey := fmt.Sprintf("ratelimit:%s", key)
 	count, err := r.client.Incr(ctx, rateKey).Result()
 	if err != nil {
-		return true, nil // Fail open
+		return false, fmt.Errorf("failed to evaluate redis rate limit: %w", err)
 	}
 
 	if count == 1 {
@@ -1157,7 +1218,7 @@ func NewRedisRevocationStore(client *redis.Client) *RedisRevocationStore {
 // IsTokenRevoked checks whether the cached token version in Redis is greater than tokenVersion.
 func (s *RedisRevocationStore) IsTokenRevoked(ctx context.Context, institutionID, userID string, tokenVersion int) (bool, error) {
 	if s.client == nil {
-		return false, nil
+		return false, fmt.Errorf("revocation store unavailable: redis client not configured")
 	}
 
 	cacheKey := fmt.Sprintf("cache:%s:user:security:%s", institutionID, userID)
@@ -1180,6 +1241,154 @@ func (s *RedisRevocationStore) RevokeUserSessions(ctx context.Context, instituti
 
 	cacheKey := fmt.Sprintf("cache:%s:user:security:%s", institutionID, userID)
 	return s.client.Set(ctx, cacheKey, newVersion, 0).Err()
+}
+```
+
+---
+
+## pkg/adapters/revocation/revocation_test.go
+
+```go
+package revocation_test
+
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"grantsupport/pkg/adapters/revocation"
+	"grantsupport/pkg/middleware"
+	"grantsupport/pkg/security"
+)
+
+func TestRedisRevocationStore_NilClientFailsClosed(t *testing.T) {
+	store := revocation.NewRedisRevocationStore(nil)
+	ctx := context.Background()
+
+	revoked, err := store.IsTokenRevoked(ctx, "inst-1", "user-1", 1)
+	if err == nil {
+		t.Fatalf("Expected error when Redis client is nil, got err=nil, revoked=%v", revoked)
+	}
+
+	err = store.RevokeUserSessions(ctx, "inst-1", "user-1", 2)
+	if err == nil {
+		t.Fatalf("Expected error when calling RevokeUserSessions with nil Redis client")
+	}
+}
+
+func TestSQLRevocationStore_NilDBFailsClosed(t *testing.T) {
+	store := revocation.NewSQLRevocationStore(nil, "postgres")
+	ctx := context.Background()
+
+	revoked, err := store.IsTokenRevoked(ctx, "inst-1", "user-1", 1)
+	if err == nil {
+		t.Fatalf("Expected error when SQL DB is nil, got err=nil, revoked=%v", revoked)
+	}
+
+	err = store.RevokeUserSessions(ctx, "inst-1", "user-1", 2)
+	if err == nil {
+		t.Fatalf("Expected error when calling RevokeUserSessions with nil SQL DB")
+	}
+}
+
+func TestAuthMiddleware_NilRevocationStoreFailsClosedWith503(t *testing.T) {
+	_ = security.SetupTestRSAKeys()
+
+	instID := uuid.New().String()
+	userID := uuid.New().String()
+	jwtToken, err := security.GenerateJWTWithVersion(userID, instID, "ADMIN", "FULL_ACCESS", 1, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWTWithVersion failed: %v", err)
+	}
+
+	// Create AuthMiddleware wrapping a nil client RedisRevocationStore
+	nilRevStore := revocation.NewRedisRevocationStore(nil)
+	authMiddleware := middleware.NewAuthMiddleware(nilRevStore)
+
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Must fail closed with 503 Service Unavailable, NEVER 200 OK
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Expected fail-closed 503 Service Unavailable, got: %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthMiddleware_ExplicitNilStoreFailsClosedWith503(t *testing.T) {
+	_ = security.SetupTestRSAKeys()
+
+	instID := uuid.New().String()
+	userID := uuid.New().String()
+	jwtToken, err := security.GenerateJWTWithVersion(userID, instID, "ADMIN", "FULL_ACCESS", 1, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWTWithVersion failed: %v", err)
+	}
+
+	authMiddleware := middleware.NewAuthMiddleware(nil)
+
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Expected fail-closed 503 Service Unavailable for nil store, got: %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+type mockRevokedStore struct{}
+
+func (m *mockRevokedStore) IsTokenRevoked(ctx context.Context, institutionID, userID string, tokenVersion int) (bool, error) {
+	return true, nil
+}
+
+func (m *mockRevokedStore) RevokeUserSessions(ctx context.Context, institutionID, userID string, newVersion int) error {
+	return nil
+}
+
+func TestAuthMiddleware_RevokedTokenReturns401(t *testing.T) {
+	_ = security.SetupTestRSAKeys()
+
+	instID := uuid.New().String()
+	userID := uuid.New().String()
+	jwtToken, err := security.GenerateJWTWithVersion(userID, instID, "ADMIN", "FULL_ACCESS", 1, 1*time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWTWithVersion failed: %v", err)
+	}
+
+	authMiddleware := middleware.NewAuthMiddleware(&mockRevokedStore{})
+
+	handler := authMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 Unauthorized for revoked token, got: %d (%s)", rec.Code, rec.Body.String())
+	}
 }
 ```
 
@@ -1216,7 +1425,7 @@ func NewSQLRevocationStore(db *sql.DB, dialect string) *SQLRevocationStore {
 // IsTokenRevoked returns true if the user's current minimum valid token version is greater than tokenVersion.
 func (s *SQLRevocationStore) IsTokenRevoked(ctx context.Context, institutionID, userID string, tokenVersion int) (bool, error) {
 	if s.db == nil {
-		return false, nil // fail-open if not configured or fallback
+		return false, fmt.Errorf("revocation store not configured: no database connection")
 	}
 
 	var currentVersion int
@@ -1600,25 +1809,31 @@ package config
 
 import (
 	"os"
+	"strconv"
 )
 
 // Config holds environment configurations for database, caching, queues, KMS encryption, and server ports.
 type Config struct {
-	DatabaseURL            string
-	DatabaseDialect        string
-	ValkeyCacheURL         string
-	ValkeyQueueURL         string
-	Port                   string
-	Environment            string
-	AWSRegion              string
-	EncryptionProvider     string
-	KmsKeyID               string
-	LocalSecretKey         string
-	MasterEncryptionKey    string
-	TrustedProxies         []string
-	EnforceStrictIPBinding bool
-	WebhookURL             string
-	WebhookSecret          string
+	DatabaseURL              string
+	DatabaseDialect          string
+	ValkeyCacheURL           string
+	ValkeyQueueURL           string
+	Port                     string
+	Environment              string
+	AWSRegion                string
+	EncryptionProvider       string
+	KmsKeyID                 string
+	LocalSecretKey           string
+	MasterEncryptionKey      string
+	TrustedProxies           []string
+	EnforceStrictIPBinding   bool
+	WebhookURL               string
+	WebhookSecret            string
+	AutoMigrate              bool
+	DBMaxOpenConns           int
+	DBMaxIdleConns           int
+	DBConnMaxLifetimeMinutes int
+	DBConnMaxIdleTimeMinutes int
 }
 
 // AppConfig is a global singleton instance of application configuration.
@@ -1697,22 +1912,61 @@ func LoadConfig() (*Config, error) {
 	webhookURL := os.Getenv("WEBHOOK_URL")
 	webhookSecret := os.Getenv("WEBHOOK_SECRET")
 
+	autoMigrateStr := os.Getenv("AUTO_MIGRATE")
+	autoMigrate := false
+	if autoMigrateStr == "true" || (autoMigrateStr == "" && env != "production") {
+		autoMigrate = true
+	}
+
+	maxOpenConns := 50
+	if v := os.Getenv("DB_MAX_OPEN_CONNS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxOpenConns = parsed
+		}
+	}
+
+	maxIdleConns := 10
+	if v := os.Getenv("DB_MAX_IDLE_CONNS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxIdleConns = parsed
+		}
+	}
+
+	connMaxLifetime := 15
+	if v := os.Getenv("DB_CONN_MAX_LIFETIME_MINUTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			connMaxLifetime = parsed
+		}
+	}
+
+	connMaxIdleTime := 5
+	if v := os.Getenv("DB_CONN_MAX_IDLE_TIME_MINUTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			connMaxIdleTime = parsed
+		}
+	}
+
 	cfg := &Config{
-		DatabaseURL:            dbURL,
-		DatabaseDialect:        dbDialect,
-		ValkeyCacheURL:         valkeyCacheURL,
-		ValkeyQueueURL:         valkeyQueueURL,
-		Port:                   port,
-		Environment:            env,
-		AWSRegion:              awsRegion,
-		EncryptionProvider:     provider,
-		KmsKeyID:               kmsKeyID,
-		LocalSecretKey:         localSecretKey,
-		MasterEncryptionKey:    masterKey,
-		TrustedProxies:         []string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
-		EnforceStrictIPBinding: strictIP,
-		WebhookURL:             webhookURL,
-		WebhookSecret:          webhookSecret,
+		DatabaseURL:              dbURL,
+		DatabaseDialect:          dbDialect,
+		ValkeyCacheURL:           valkeyCacheURL,
+		ValkeyQueueURL:           valkeyQueueURL,
+		Port:                     port,
+		Environment:              env,
+		AWSRegion:                awsRegion,
+		EncryptionProvider:       provider,
+		KmsKeyID:                 kmsKeyID,
+		LocalSecretKey:           localSecretKey,
+		MasterEncryptionKey:      masterKey,
+		TrustedProxies:           []string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+		EnforceStrictIPBinding:   strictIP,
+		WebhookURL:               webhookURL,
+		WebhookSecret:            webhookSecret,
+		AutoMigrate:              autoMigrate,
+		DBMaxOpenConns:           maxOpenConns,
+		DBMaxIdleConns:           maxIdleConns,
+		DBConnMaxLifetimeMinutes: connMaxLifetime,
+		DBConnMaxIdleTimeMinutes: connMaxIdleTime,
 	}
 
 	AppConfig = cfg
@@ -1799,6 +2053,13 @@ func GetRole(ctx context.Context) (string, bool) {
 ```go
 package controller
 
+import (
+	"net/http"
+
+	"github.com/google/uuid"
+	pkgctx "grantsupport/pkg/context"
+)
+
 // GrantSupportInput captures support delegation duration, scopes, and IP restrictions.
 type GrantSupportInput struct {
 	DurationMinutes int      `json:"durationMinutes" validate:"gte=1,lte=1440"`
@@ -1810,6 +2071,24 @@ type GrantSupportInput struct {
 type SupportLoginInput struct {
 	Token   string `json:"token" validate:"required"`
 	AgentID string `json:"agentId,omitempty" validate:"omitempty,uuid"`
+}
+
+// resolveCallerID extracts the effective caller UUID from explicit body, tenant context, or user context.
+func resolveCallerID(r *http.Request, agentID string) (uuid.UUID, error) {
+	if agentID != "" {
+		parsed, err := uuid.Parse(agentID)
+		if err != nil {
+			return uuid.Nil, NewAppError(http.StatusBadRequest, "INVALID_AGENT_ID", "agentId must be a valid UUID")
+		}
+		return parsed, nil
+	}
+	if tenant, ok := pkgctx.GetTenant(r.Context()); ok && tenant != nil {
+		return tenant.UserID, nil
+	}
+	if userID, ok := pkgctx.GetUser(r.Context()); ok {
+		return userID, nil
+	}
+	return uuid.Nil, NewAppError(http.StatusBadRequest, "AGENT_ID_REQUIRED", "Explicit agentId UUID must be provided in request body")
 }
 ```
 
@@ -1823,7 +2102,6 @@ package controller
 import (
 	"net/http"
 
-	"github.com/google/uuid"
 	pkgctx "grantsupport/pkg/context"
 	"grantsupport/pkg/service"
 )
@@ -1835,9 +2113,7 @@ type SupportGrantController struct {
 
 // NewSupportGrantController constructs a SupportGrantController instance.
 func NewSupportGrantController(grantService *service.GrantSupportService) *SupportGrantController {
-	return &SupportGrantController{
-		grantService: grantService,
-	}
+	return &SupportGrantController{grantService: grantService}
 }
 
 // GrantSupport generates a temporary platform owner support audit token.
@@ -1847,22 +2123,15 @@ func (c *SupportGrantController) GrantSupport(w http.ResponseWriter, r *http.Req
 	if !ok || tenant == nil {
 		return NewAppError(http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
 	}
-
 	input, err := DecodeAndValidate[GrantSupportInput](r)
 	if err != nil {
 		return err
 	}
-
 	token, err := c.grantService.CreateSupportGrantScoped(r.Context(), tenant.InstitutionID, tenant.UserID, input.DurationMinutes, input.Scope, input.WhitelistedIPs)
 	if err != nil {
 		return NewAppError(http.StatusBadRequest, "GRANT_FAILED", err.Error())
 	}
-
-	WriteJSON(w, http.StatusCreated, map[string]any{
-		"success": true,
-		"message": "Support access token generated successfully.",
-		"token":   token,
-	})
+	WriteJSON(w, http.StatusCreated, map[string]any{"success": true, "message": "Support access token generated successfully.", "token": token})
 	return nil
 }
 
@@ -1873,36 +2142,15 @@ func (c *SupportGrantController) SupportLogin(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-
-	var callerID uuid.UUID
-	if input.AgentID != "" {
-		parsed, err := uuid.Parse(input.AgentID)
-		if err != nil {
-			return NewAppError(http.StatusBadRequest, "INVALID_AGENT_ID", "agentId must be a valid UUID")
-		}
-		callerID = parsed
-	} else if tenant, ok := pkgctx.GetTenant(r.Context()); ok && tenant != nil {
-		callerID = tenant.UserID
-	} else if userID, ok := pkgctx.GetUser(r.Context()); ok {
-		callerID = userID
-	} else {
-		return NewAppError(http.StatusBadRequest, "AGENT_ID_REQUIRED", "Explicit agentId UUID must be provided in request body")
+	callerID, err := resolveCallerID(r, input.AgentID)
+	if err != nil {
+		return err
 	}
-
 	instID, jwtToken, err := c.grantService.SupportLogin(r.Context(), input.Token, callerID)
 	if err != nil {
 		return NewAppError(http.StatusUnauthorized, "SUPPORT_LOGIN_FAILED", err.Error())
 	}
-
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"success":      true,
-		"message":      "Delegated support login successful.",
-		"access_token": jwtToken,
-		"data": map[string]any{
-			"institution_id": instID,
-			"access_token":   jwtToken,
-		},
-	})
+	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support agent authenticated successfully.", "institution_id": instID, "access_token": jwtToken, "accessToken": jwtToken, "data": map[string]any{"institution_id": instID, "access_token": jwtToken}})
 	return nil
 }
 
@@ -1913,15 +2161,10 @@ func (c *SupportGrantController) RevokeSupport(w http.ResponseWriter, r *http.Re
 	if !ok || tenant == nil {
 		return NewAppError(http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
 	}
-
 	if err := c.grantService.RevokeSupportGrant(r.Context(), tenant.InstitutionID, tenant.UserID); err != nil {
 		return NewAppError(http.StatusInternalServerError, "REVOKE_FAILED", err.Error())
 	}
-
-	WriteJSON(w, http.StatusOK, map[string]any{
-		"success": true,
-		"message": "All support delegations revoked successfully.",
-	})
+	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "All support delegations revoked successfully."})
 	return nil
 }
 ```
@@ -1998,10 +2241,25 @@ func CatchAsync(fn func(w http.ResponseWriter, r *http.Request) error) http.Hand
 	}
 }
 
+// DefaultMaxBodyBytes sets the maximum allowed HTTP request body size (1 MB).
+const DefaultMaxBodyBytes = 1 << 20
+
 // DecodeAndValidate parses JSON payload into a target struct DTO and executes go-playground/validator v10 validation rules.
+// It wraps r.Body with http.MaxBytesReader to prevent denial-of-service from oversized request payloads.
 func DecodeAndValidate[T any](r *http.Request) (T, error) {
 	var dto T
-	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+	if r.Body == nil {
+		return dto, NewAppError(http.StatusBadRequest, "EMPTY_BODY", "Request body must not be empty")
+	}
+
+	limitedBody := http.MaxBytesReader(nil, r.Body, DefaultMaxBodyBytes)
+	decoder := json.NewDecoder(limitedBody)
+
+	if err := decoder.Decode(&dto); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return dto, NewAppError(http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Request payload exceeds maximum allowed size of 1MB")
+		}
 		return dto, NewAppError(http.StatusBadRequest, "INVALID_JSON", "Invalid JSON request body format")
 	}
 
@@ -2043,6 +2301,74 @@ func getRemoteIP(r *http.Request) string {
 
 ---
 
+## pkg/controller/base_controller_test.go
+
+```go
+package controller_test
+
+import (
+	"bytes"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"grantsupport/pkg/controller"
+)
+
+type SampleTestDTO struct {
+	Name  string `json:"name" validate:"required"`
+	Count int    `json:"count" validate:"gte=1"`
+}
+
+func TestDecodeAndValidate_ValidPayload(t *testing.T) {
+	body := []byte(`{"name":"test_grant","count":5}`)
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader(body))
+
+	dto, err := controller.DecodeAndValidate[SampleTestDTO](req)
+	if err != nil {
+		t.Fatalf("Expected valid decoding, got err: %v", err)
+	}
+	if dto.Name != "test_grant" || dto.Count != 5 {
+		t.Fatalf("Unexpected DTO values: %+v", dto)
+	}
+}
+
+func TestDecodeAndValidate_MalformedJSON(t *testing.T) {
+	body := []byte(`{"name":`)
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader(body))
+
+	_, err := controller.DecodeAndValidate[SampleTestDTO](req)
+	if err == nil {
+		t.Fatal("Expected error for malformed JSON, got nil")
+	}
+
+	appErr, ok := err.(*controller.AppError)
+	if !ok || appErr.Status != http.StatusBadRequest || appErr.Code != "INVALID_JSON" {
+		t.Fatalf("Expected AppError with Status=400, Code=INVALID_JSON, got: %+v", err)
+	}
+}
+
+func TestDecodeAndValidate_OversizedPayloadRejected(t *testing.T) {
+	// Generate payload exceeding 1MB (1.5 MB)
+	largeString := strings.Repeat("A", 1500000)
+	body := []byte(`{"name":"` + largeString + `","count":1}`)
+	req := httptest.NewRequest(http.MethodPost, "/test", bytes.NewReader(body))
+
+	_, err := controller.DecodeAndValidate[SampleTestDTO](req)
+	if err == nil {
+		t.Fatal("Expected error for payload > 1MB, got nil")
+	}
+
+	appErr, ok := err.(*controller.AppError)
+	if !ok || appErr.Status != http.StatusRequestEntityTooLarge || appErr.Code != "PAYLOAD_TOO_LARGE" {
+		t.Fatalf("Expected AppError with Status=413 PAYLOAD_TOO_LARGE, got: %+v", err)
+	}
+}
+```
+
+---
+
 ## pkg/domain/support_grant.go
 
 ```go
@@ -2073,10 +2399,10 @@ package grantsupport
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -2088,6 +2414,7 @@ import (
 	"grantsupport/pkg/adapters/ratelimit"
 	"grantsupport/pkg/adapters/replay"
 	"grantsupport/pkg/adapters/revocation"
+	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
 	"grantsupport/pkg/middleware"
 	"grantsupport/pkg/ports"
@@ -2146,7 +2473,11 @@ func NewEngine(opts ...Option) (*Engine, error) {
 			return nil, fmt.Errorf("failed to auto-migrate database schema: %w", err)
 		}
 		if cfg.SQLDB != nil {
-			if err := createCapabilityTables(migrateCtx, cfg.SQLDB, cfg.Dialect); err != nil {
+			if err := repository.CreateCapabilityTables(migrateCtx, cfg.SQLDB, cfg.Dialect); err != nil {
+				return nil, fmt.Errorf("failed to create capability tables: %w", err)
+			}
+		} else if baseRepo.SQLDB != nil {
+			if err := repository.CreateCapabilityTables(migrateCtx, baseRepo.SQLDB, baseRepo.Dialect); err != nil {
 				return nil, fmt.Errorf("failed to create capability tables: %w", err)
 			}
 		}
@@ -2159,7 +2490,14 @@ func NewEngine(opts ...Option) (*Engine, error) {
 		}
 	} else {
 		if err := security.LoadJWTKeysFromEnv(); err != nil {
-			// Generate test keypair fallback
+			isProd := cfg.Environment == "production" || os.Getenv("GO_ENV") == "production"
+			if !isProd && config.AppConfig != nil && config.AppConfig.Environment == "production" {
+				isProd = true
+			}
+			if isProd {
+				return nil, fmt.Errorf("PRODUCTION_JWT_KEYS_REQUIRED: RSA JWT keys (JWT_PRIVATE_KEY, JWT_PUBLIC_KEY) are required in production: %w", err)
+			}
+			// Generate test keypair fallback (development/test only)
 			if err := security.SetupTestRSAKeys(); err != nil {
 				return nil, fmt.Errorf("failed to initialize transient RSA JWT keys: %w", err)
 			}
@@ -2167,10 +2505,17 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	}
 
 	// 4. Initialize Capability Stores (Default to SQL or In-Memory adapters if omitted)
+	targetSQLDB := cfg.SQLDB
+	targetDialect := cfg.Dialect
+	if targetSQLDB == nil && baseRepo.SQLDB != nil {
+		targetSQLDB = baseRepo.SQLDB
+		targetDialect = baseRepo.Dialect
+	}
+
 	lockStore := cfg.LockStore
 	if lockStore == nil {
-		if cfg.SQLDB != nil {
-			lockStore = lock.NewSQLLockStore(cfg.SQLDB, cfg.Dialect)
+		if targetSQLDB != nil {
+			lockStore = lock.NewSQLLockStore(targetSQLDB, targetDialect)
 		} else {
 			lockStore = lock.NewMemoryLockStore()
 		}
@@ -2178,8 +2523,8 @@ func NewEngine(opts ...Option) (*Engine, error) {
 
 	replayStore := cfg.ReplayStore
 	if replayStore == nil {
-		if cfg.SQLDB != nil {
-			replayStore = replay.NewSQLReplayStore(cfg.SQLDB, cfg.Dialect)
+		if targetSQLDB != nil {
+			replayStore = replay.NewSQLReplayStore(targetSQLDB, targetDialect)
 		} else {
 			replayStore = replay.NewMemoryReplayStore(1 * time.Minute)
 		}
@@ -2187,9 +2532,12 @@ func NewEngine(opts ...Option) (*Engine, error) {
 
 	revocationStore := cfg.RevocationStore
 	if revocationStore == nil {
-		if cfg.SQLDB != nil {
-			revocationStore = revocation.NewSQLRevocationStore(cfg.SQLDB, cfg.Dialect)
+		if targetSQLDB != nil {
+			revocationStore = revocation.NewSQLRevocationStore(targetSQLDB, targetDialect)
 		}
+	}
+	if revocationStore == nil {
+		return nil, errors.New("REVOCATION_STORE_REQUIRED: A valid RevocationStore or database connection must be configured to ensure session revocation security")
 	}
 
 	rateLimiter := cfg.RateLimiter
@@ -2271,12 +2619,15 @@ func (e *Engine) HTTPHandler() http.Handler {
 		_, _ = w.Write([]byte(`{"status":"UP","service":"GrantSupport Engine","version":"v1.0.0"}`))
 	})
 
-	// Public Support Login
-	r.Post("/api/v1/auth/support/login", controller.CatchAsync(e.grantController.SupportLogin))
+	// Public Support Login (Rate limited to 10 attempts per minute per IP)
+	r.With(
+		middleware.RateLimitMiddleware(e.rateLimiter, 10, 60),
+	).Post("/api/v1/auth/support/login", controller.CatchAsync(e.grantController.SupportLogin))
 
 	// Authenticated Admin Endpoints
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.NewAuthMiddleware(e.revocationStore))
+		r.Use(middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"))
 		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(e.grantController.GrantSupport))
 		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(e.grantController.RevokeSupport))
 	})
@@ -2285,6 +2636,10 @@ func (e *Engine) HTTPHandler() http.Handler {
 }
 
 // BulletproofMiddleware returns the 5-layer Ed25519 dual-key authentication middleware.
+// This is an opt-in capability for Go embedders building their own machine-to-machine API routes.
+// It is NOT applied to the default HTTPHandler() endpoints (login/grant/revoke), which use simpler
+// JWT bearer authentication instead. Callers must build and manage their own keyStore — no key
+// persistence or registration API is provided by this package.
 func (e *Engine) BulletproofMiddleware(keyStore map[string]*security.APIKeyDetails) func(http.Handler) http.Handler {
 	return middleware.BulletproofAuthMiddleware(e.replayStore, keyStore)
 }
@@ -2294,8 +2649,14 @@ func (e *Engine) AuthMiddleware() func(http.Handler) http.Handler {
 	return middleware.NewAuthMiddleware(e.revocationStore)
 }
 
-// Close gracefully releases engine resources. Does NOT close caller-provided *sql.DB.
+// Close gracefully releases engine resources and drains in-flight webhooks. Does NOT close caller-provided *sql.DB.
 func (e *Engine) Close() error {
+	if e.webhookDispatcher != nil {
+		drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = e.webhookDispatcher.Close(drainCtx)
+		cancel()
+	}
+
 	if memReplay, ok := e.replayStore.(*replay.MemoryReplayStore); ok {
 		memReplay.Close()
 	}
@@ -2305,76 +2666,6 @@ func (e *Engine) Close() error {
 	}
 
 	return nil
-}
-
-func createCapabilityTables(ctx context.Context, db *sql.DB, dialect string) error {
-	if db == nil {
-		return nil
-	}
-
-	var ddl string
-	switch dialect {
-	case "sqlite", "sqlite3":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key TEXT PRIMARY KEY,
-			owner_token TEXT NOT NULL,
-			expires_at DATETIME NOT NULL,
-			acquired_at DATETIME NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key TEXT PRIMARY KEY,
-			expires_at DATETIME NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id TEXT NOT NULL,
-			user_id TEXT NOT NULL,
-			token_version INTEGER NOT NULL DEFAULT 1,
-			revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (institution_id, user_id)
-		);`
-	case "mysql", "mariadb":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key VARCHAR(255) PRIMARY KEY,
-			owner_token VARCHAR(64) NOT NULL,
-			expires_at DATETIME(6) NOT NULL,
-			acquired_at DATETIME(6) NOT NULL
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key VARCHAR(255) PRIMARY KEY,
-			expires_at DATETIME(6) NOT NULL
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id VARCHAR(36) NOT NULL,
-			user_id VARCHAR(36) NOT NULL,
-			token_version INT NOT NULL DEFAULT 1,
-			revoked_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-			PRIMARY KEY (institution_id, user_id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
-	default: // postgres, pgx
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key VARCHAR(255) PRIMARY KEY,
-			owner_token VARCHAR(64) NOT NULL,
-			expires_at TIMESTAMPTZ NOT NULL,
-			acquired_at TIMESTAMPTZ NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key VARCHAR(255) PRIMARY KEY,
-			expires_at TIMESTAMPTZ NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id UUID NOT NULL,
-			user_id UUID NOT NULL,
-			token_version INTEGER NOT NULL DEFAULT 1,
-			revoked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (institution_id, user_id)
-		);`
-	}
-
-	_, err := db.ExecContext(ctx, ddl)
-	return err
 }
 ```
 
@@ -2394,6 +2685,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -2615,6 +2907,292 @@ func TestEngineWithPgxPoolOwnership(t *testing.T) {
 		t.Fatalf("Caller pgxpool query failed after engine.Close(): %v", err)
 	}
 }
+
+func TestAdminEndpoints_RBACEnforcement(t *testing.T) {
+	_ = security.SetupTestRSAKeys()
+
+	db, err := sql.Open("sqlite", "file:grantsupport_rbac_test?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1")
+	if err != nil {
+		t.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer db.Close()
+
+	engine, err := grantsupport.NewEngine(
+		grantsupport.WithDB(db, "sqlite"),
+		grantsupport.WithAutoMigrate(true),
+	)
+	if err != nil {
+		t.Fatalf("NewEngine failed: %v", err)
+	}
+	defer engine.Close()
+
+	handler := engine.HTTPHandler()
+	instID := uuid.New()
+	adminID := uuid.New()
+	agentID := uuid.New()
+	regularUserID := uuid.New()
+
+	// 1. Generate JWT tokens for different roles
+	adminJWT, err := security.GenerateJWT(adminID.String(), instID.String(), "ADMIN", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWT ADMIN failed: %v", err)
+	}
+
+	ownerJWT, err := security.GenerateJWT(adminID.String(), instID.String(), "OWNER", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWT OWNER failed: %v", err)
+	}
+
+	agentJWT, err := security.GenerateJWT(agentID.String(), instID.String(), "SUPPORT_AGENT", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWT SUPPORT_AGENT failed: %v", err)
+	}
+
+	userJWT, err := security.GenerateJWT(regularUserID.String(), instID.String(), "USER", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWT USER failed: %v", err)
+	}
+
+	grantBody := []byte(`{"durationMinutes":60,"scope":"FULL_ACCESS"}`)
+
+	// Case A: ADMIN role succeeds (201 Created)
+	reqAdmin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", bytes.NewReader(grantBody))
+	reqAdmin.Header.Set("Content-Type", "application/json")
+	reqAdmin.Header.Set("Authorization", "Bearer "+adminJWT)
+	recAdmin := httptest.NewRecorder()
+	handler.ServeHTTP(recAdmin, reqAdmin)
+	if recAdmin.Code != http.StatusCreated {
+		t.Fatalf("ADMIN expected 201 Created on /grant, got: %d (%s)", recAdmin.Code, recAdmin.Body.String())
+	}
+
+	// Case B: OWNER role succeeds (201 Created)
+	reqOwner := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", bytes.NewReader(grantBody))
+	reqOwner.Header.Set("Content-Type", "application/json")
+	reqOwner.Header.Set("Authorization", "Bearer "+ownerJWT)
+	recOwner := httptest.NewRecorder()
+	handler.ServeHTTP(recOwner, reqOwner)
+	if recOwner.Code != http.StatusCreated {
+		t.Fatalf("OWNER expected 201 Created on /grant, got: %d (%s)", recOwner.Code, recOwner.Body.String())
+	}
+
+	// Case C: SUPPORT_AGENT role is rejected with 403 Forbidden
+	reqAgent := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", bytes.NewReader(grantBody))
+	reqAgent.Header.Set("Content-Type", "application/json")
+	reqAgent.Header.Set("Authorization", "Bearer "+agentJWT)
+	recAgent := httptest.NewRecorder()
+	handler.ServeHTTP(recAgent, reqAgent)
+	if recAgent.Code != http.StatusForbidden {
+		t.Fatalf("SUPPORT_AGENT expected 403 Forbidden on /grant, got: %d (%s)", recAgent.Code, recAgent.Body.String())
+	}
+
+	// Case D: Standard USER role is rejected with 403 Forbidden
+	reqUser := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", bytes.NewReader(grantBody))
+	reqUser.Header.Set("Content-Type", "application/json")
+	reqUser.Header.Set("Authorization", "Bearer "+userJWT)
+	recUser := httptest.NewRecorder()
+	handler.ServeHTTP(recUser, reqUser)
+	if recUser.Code != http.StatusForbidden {
+		t.Fatalf("USER expected 403 Forbidden on /grant, got: %d (%s)", recUser.Code, recUser.Body.String())
+	}
+
+	// Case E: Revoke endpoint also enforces RBAC (ADMIN succeeds, USER rejected)
+	reqRevokeUser := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/revoke", nil)
+	reqRevokeUser.Header.Set("Authorization", "Bearer "+userJWT)
+	recRevokeUser := httptest.NewRecorder()
+	handler.ServeHTTP(recRevokeUser, reqRevokeUser)
+	if recRevokeUser.Code != http.StatusForbidden {
+		t.Fatalf("USER expected 403 Forbidden on /revoke, got: %d", recRevokeUser.Code)
+	}
+
+	reqRevokeAdmin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/revoke", nil)
+	reqRevokeAdmin.Header.Set("Authorization", "Bearer "+adminJWT)
+	recRevokeAdmin := httptest.NewRecorder()
+	handler.ServeHTTP(recRevokeAdmin, reqRevokeAdmin)
+	if recRevokeAdmin.Code != http.StatusOK {
+		t.Fatalf("ADMIN expected 200 OK on /revoke, got: %d", recRevokeAdmin.Code)
+	}
+}
+
+type mockCustomRevocationStore struct {
+	isRevoked bool
+	called    bool
+}
+
+func (m *mockCustomRevocationStore) IsTokenRevoked(ctx context.Context, institutionID, userID string, tokenVersion int) (bool, error) {
+	m.called = true
+	return m.isRevoked, nil
+}
+
+func (m *mockCustomRevocationStore) RevokeUserSessions(ctx context.Context, institutionID, userID string, newVersion int) error {
+	m.isRevoked = true
+	return nil
+}
+
+func TestEngine_WithEntClient_WorkingRevocation(t *testing.T) {
+	ctx := context.Background()
+	_ = security.SetupTestRSAKeys()
+
+	db, err := sql.Open("sqlite", "file:grantsupport_ent_revoc_test?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1")
+	if err != nil {
+		t.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer db.Close()
+
+	baseRepo := repository.NewBaseRepositoryWithDB(db, "sqlite")
+	callerEntClient, err := baseRepo.GetClient(ctx)
+	if err != nil {
+		t.Fatalf("Failed to get Ent client: %v", err)
+	}
+
+	// Initialize Engine injecting caller's *ent.Client without explicit RevocationStore
+	engine, err := grantsupport.NewEngine(
+		grantsupport.WithEntClient(callerEntClient),
+		grantsupport.WithAutoMigrate(true),
+	)
+	if err != nil {
+		t.Fatalf("NewEngine with EntClient failed: %v", err)
+	}
+	defer engine.Close()
+
+	instID := uuid.New()
+	adminID := uuid.New()
+	agentID := uuid.New()
+
+	rawToken, err := engine.CreateSupportGrant(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
+	if err != nil {
+		t.Fatalf("CreateSupportGrant failed: %v", err)
+	}
+
+	_, jwtToken, err := engine.SupportLogin(ctx, rawToken, agentID)
+	if err != nil {
+		t.Fatalf("SupportLogin failed: %v", err)
+	}
+
+	authHandler := engine.AuthMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("AUTHENTICATED"))
+	}))
+
+	// 1. Initial valid request succeeds
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	rec := httptest.NewRecorder()
+	authHandler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Expected 200 OK for valid JWT with EntClient-backed revocation, got: %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEngine_WithCustomRevocationStore(t *testing.T) {
+	_ = security.SetupTestRSAKeys()
+
+	db, err := sql.Open("sqlite", "file:grantsupport_custom_revoc_test?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1")
+	if err != nil {
+		t.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer db.Close()
+
+	customStore := &mockCustomRevocationStore{isRevoked: true}
+
+	engine, err := grantsupport.NewEngine(
+		grantsupport.WithDB(db, "sqlite"),
+		grantsupport.WithRevocationStore(customStore),
+		grantsupport.WithAutoMigrate(true),
+	)
+	if err != nil {
+		t.Fatalf("NewEngine with custom RevocationStore failed: %v", err)
+	}
+	defer engine.Close()
+
+	instID := uuid.New()
+	agentID := uuid.New()
+	jwtToken, err := security.GenerateJWT(agentID.String(), instID.String(), "ADMIN", 1*time.Hour)
+	if err != nil {
+		t.Fatalf("GenerateJWT failed: %v", err)
+	}
+
+	authHandler := engine.AuthMiddleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("Authorization", "Bearer "+jwtToken)
+	rec := httptest.NewRecorder()
+
+	authHandler.ServeHTTP(rec, req)
+	if !customStore.called {
+		t.Fatal("Expected custom RevocationStore to be invoked during auth check")
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("Expected 401 Unauthorized for revoked token via custom store, got: %d", rec.Code)
+	}
+}
+
+func TestEngine_ProductionJWTKeysRequired(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:grantsupport_prod_key_test?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1")
+	if err != nil {
+		t.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer db.Close()
+
+	// Ensure environment keys are empty
+	os.Unsetenv("JWT_PRIVATE_KEY")
+	os.Unsetenv("JWT_PUBLIC_KEY")
+
+	_, err = grantsupport.NewEngine(
+		grantsupport.WithDB(db, "sqlite"),
+		grantsupport.WithEnvironment("production"),
+		grantsupport.WithAutoMigrate(false),
+	)
+	if err == nil {
+		t.Fatal("Expected NewEngine to fail in production mode without explicit JWT keys")
+	}
+}
+
+func TestEngine_DevelopmentWithoutKeysUsesTransientKeys(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:grantsupport_dev_key_test?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1")
+	if err != nil {
+		t.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer db.Close()
+
+	os.Unsetenv("JWT_PRIVATE_KEY")
+	os.Unsetenv("JWT_PUBLIC_KEY")
+
+	engine, err := grantsupport.NewEngine(
+		grantsupport.WithDB(db, "sqlite"),
+		grantsupport.WithEnvironment("development"),
+		grantsupport.WithAutoMigrate(true),
+	)
+	if err != nil {
+		t.Fatalf("Expected NewEngine in development mode to succeed with transient keys, got: %v", err)
+	}
+	defer engine.Close()
+}
+
+func TestEngine_ProductionWithValidKeysSucceeds(t *testing.T) {
+	db, err := sql.Open("sqlite", "file:grantsupport_prod_validkey_test?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1")
+	if err != nil {
+		t.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer db.Close()
+
+	privPEM, pubPEM, err := security.GenerateRSAKeypairPEM()
+	if err != nil {
+		t.Fatalf("Failed to generate test RSA keypair: %v", err)
+	}
+
+	engine, err := grantsupport.NewEngine(
+		grantsupport.WithDB(db, "sqlite"),
+		grantsupport.WithEnvironment("production"),
+		grantsupport.WithJWTKeys(privPEM, pubPEM),
+		grantsupport.WithAutoMigrate(true),
+	)
+	if err != nil {
+		t.Fatalf("Expected NewEngine in production mode with explicit keys to succeed, got: %v", err)
+	}
+	defer engine.Close()
+}
 ```
 
 ---
@@ -2647,6 +3225,7 @@ type EngineConfig struct {
 	PublicKeyPEM    []byte
 	WebhookURL      string
 	WebhookSecret   string
+	Environment     string
 	AutoMigrate     bool
 	OwnsDB          bool
 }
@@ -2731,6 +3310,13 @@ func WithAutoMigrate(enable bool) Option {
 		c.AutoMigrate = enable
 	}
 }
+
+// WithEnvironment configures runtime environment mode (e.g., "production", "development", "test").
+func WithEnvironment(env string) Option {
+	return func(c *EngineConfig) {
+		c.Environment = env
+	}
+}
 ```
 
 ---
@@ -2780,13 +3366,20 @@ func NewAuthMiddleware(revocationStore ports.RevocationStore) func(http.Handler)
 				return
 			}
 
-			// TokenVersion revocation check
-			if revocationStore != nil {
-				revoked, err := revocationStore.IsTokenRevoked(r.Context(), claims.InstitutionID, claims.UserID, claims.TokenVersion)
-				if err == nil && revoked {
-					controller.WriteRFC7807Error(w, http.StatusUnauthorized, "TOKEN_REVOKED", "Session has been revoked. Please log in again.")
-					return
-				}
+			// TokenVersion revocation check (Fail-closed: missing revocation store or store error rejects request)
+			if revocationStore == nil {
+				controller.WriteRFC7807Error(w, http.StatusServiceUnavailable, "REVOCATION_CHECK_UNAVAILABLE", "Revocation store is not configured; unable to verify session revocation status.")
+				return
+			}
+
+			revoked, err := revocationStore.IsTokenRevoked(r.Context(), claims.InstitutionID, claims.UserID, claims.TokenVersion)
+			if err != nil {
+				controller.WriteRFC7807Error(w, http.StatusServiceUnavailable, "REVOCATION_CHECK_UNAVAILABLE", "Unable to verify session revocation status; please retry.")
+				return
+			}
+			if revoked {
+				controller.WriteRFC7807Error(w, http.StatusUnauthorized, "TOKEN_REVOKED", "Session has been revoked. Please log in again.")
+				return
 			}
 
 			tenant := &pkgctx.TenantData{
@@ -2852,19 +3445,13 @@ func GetBulletproofSecurityContext(ctx context.Context) (*BulletproofSecurityCon
 	return bctx, ok
 }
 
-// GetRealClientIP extracts real client IP directly from socket (r.RemoteAddr) or trusted Cloudflare headers.
+// GetRealClientIP extracts real client IP directly from socket or trusted proxy headers.
 func GetRealClientIP(r *http.Request) string {
-	// If CF-Connecting-IP header exists (Cloudflare proxy), use it
-	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
-		return cfIP
+	var trustedProxies []string
+	if config.AppConfig != nil {
+		trustedProxies = config.AppConfig.TrustedProxies
 	}
-
-	// Fall back to direct TCP socket connection remote address (UN-SPOOFABLE over TCP)
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
+	return ExtractClientIP(r, trustedProxies)
 }
 
 // ValidateIPWhitelist verifies if a client IP matches a list of whitelisted IPs or CIDR subnets.
@@ -3195,6 +3782,271 @@ func CorrelationIDMiddleware(next http.Handler) http.Handler {
 
 ---
 
+## pkg/middleware/ratelimit.go
+
+```go
+package middleware
+
+import (
+	"fmt"
+	"net"
+	"net/http"
+	"strings"
+	"time"
+
+	"grantsupport/pkg/config"
+	"grantsupport/pkg/controller"
+	"grantsupport/pkg/ports"
+)
+
+// ExtractClientIP extracts the client IP address from a request, stripping ephemeral TCP ports
+// and verifying proxy headers against trusted proxy ranges to prevent IP spoofing.
+func ExtractClientIP(r *http.Request, trustedProxies []string) string {
+	socketHost := r.RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
+		socketHost = host
+	}
+	socketHost = strings.TrimSpace(socketHost)
+
+	// If no trusted proxies are configured, or if the direct socket connection is NOT from a trusted proxy,
+	// return the direct socket TCP host to prevent header spoofing.
+	if len(trustedProxies) == 0 || !ValidateIPWhitelist(socketHost, trustedProxies) {
+		return socketHost
+	}
+
+	// Direct socket connection is from a trusted reverse proxy (e.g. Cloudflare / AWS ALB):
+	// Inspect proxy headers in order of priority.
+	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
+		if net.ParseIP(cfIP) != nil {
+			return cfIP
+		}
+	}
+
+	if xRealIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); xRealIP != "" {
+		if net.ParseIP(xRealIP) != nil {
+			return xRealIP
+		}
+	}
+
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		if len(parts) > 0 {
+			firstIP := strings.TrimSpace(parts[0])
+			if net.ParseIP(firstIP) != nil {
+				return firstIP
+			}
+		}
+	}
+
+	return socketHost
+}
+
+// RateLimitMiddleware returns an HTTP middleware that throttles requests based on client IP.
+// limit specifies the maximum allowed requests in windowSeconds.
+func RateLimitMiddleware(limiter ports.RateLimiterStore, limit int, windowSeconds int) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if limiter == nil || limit <= 0 {
+				next.ServeHTTP(w, r)
+				return
+			}
+
+			var trustedProxies []string
+			if config.AppConfig != nil {
+				trustedProxies = config.AppConfig.TrustedProxies
+			}
+
+			clientIP := ExtractClientIP(r, trustedProxies)
+			key := fmt.Sprintf("ip:%s:%s", clientIP, r.URL.Path)
+
+			allowed, err := limiter.Allow(r.Context(), key, limit, time.Duration(windowSeconds)*time.Second)
+			if err != nil {
+				controller.WriteRFC7807Error(w, http.StatusServiceUnavailable, "RATE_LIMIT_UNAVAILABLE", "Rate limiting service temporarily unavailable; please retry later.")
+				return
+			}
+			if !allowed {
+				controller.WriteRFC7807Error(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too many requests. Please retry later.")
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+```
+
+---
+
+## pkg/middleware/ratelimit_test.go
+
+```go
+package middleware_test
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"testing"
+	"time"
+
+	"grantsupport/pkg/adapters/ratelimit"
+	"grantsupport/pkg/config"
+	"grantsupport/pkg/middleware"
+)
+
+func TestRateLimitMiddleware_EphemeralPortSharing(t *testing.T) {
+	limiter := ratelimit.NewMemoryRateLimiter()
+	handler := middleware.RateLimitMiddleware(limiter, 10, 60)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}))
+
+	// Send 10 requests from the same client IP (203.0.113.195) but each with a different ephemeral source port
+	for port := 50000; port < 50010; port++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+		req.RemoteAddr = fmt.Sprintf("203.0.113.195:%d", port)
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Request %d on port %d expected 200 OK, got: %d", port-50000+1, port, rec.Code)
+		}
+	}
+
+	// 11th request from the same IP on yet another ephemeral port MUST be rejected with HTTP 429
+	req11 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+	req11.RemoteAddr = "203.0.113.195:50011"
+	rec11 := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec11, req11)
+	if rec11.Code != http.StatusTooManyRequests {
+		t.Fatalf("11th request expected 429 Too Many Requests, got: %d", rec11.Code)
+	}
+
+	// Request from a DIFFERENT IP on the same port should succeed
+	reqOther := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+	reqOther.RemoteAddr = "198.51.100.4:50000"
+	recOther := httptest.NewRecorder()
+
+	handler.ServeHTTP(recOther, reqOther)
+	if recOther.Code != http.StatusOK {
+		t.Fatalf("Request from different IP expected 200 OK, got: %d", recOther.Code)
+	}
+}
+
+func TestRateLimitMiddleware_SpoofedProxyHeaderIgnored(t *testing.T) {
+	// Configure trusted proxies (only 127.0.0.1 is trusted)
+	config.AppConfig = &config.Config{
+		TrustedProxies: []string{"127.0.0.1"},
+	}
+
+	limiter := ratelimit.NewMemoryRateLimiter()
+	handler := middleware.RateLimitMiddleware(limiter, 2, 60)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}))
+
+	// Direct socket connection is an UNTRUSTED public IP (198.51.100.50) attempting to spoof CF-Connecting-IP
+	for i := 1; i <= 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+		req.RemoteAddr = fmt.Sprintf("198.51.100.50:%d", 40000+i)
+		req.Header.Set("CF-Connecting-IP", fmt.Sprintf("10.0.0.%d", i)) // Attempts to rotate spoofed IP
+		req.Header.Set("X-Forwarded-For", fmt.Sprintf("10.0.0.%d", i))
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Request %d expected 200 OK, got: %d", i, rec.Code)
+		}
+	}
+
+	// 3rd request with a different spoofed CF-Connecting-IP header must still be blocked
+	// because socket IP 198.51.100.50 is exhausted!
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+	req3.RemoteAddr = "198.51.100.50:40003"
+	req3.Header.Set("CF-Connecting-IP", "10.0.0.99")
+	rec3 := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusTooManyRequests {
+		t.Fatalf("Spoofed header bypass attempt expected 429 Too Many Requests, got: %d", rec3.Code)
+	}
+}
+
+func TestRateLimitMiddleware_TrustedProxyHeaderRespected(t *testing.T) {
+	// Configure trusted proxies (10.0.0.1 is trusted proxy)
+	config.AppConfig = &config.Config{
+		TrustedProxies: []string{"10.0.0.1"},
+	}
+
+	limiter := ratelimit.NewMemoryRateLimiter()
+	handler := middleware.RateLimitMiddleware(limiter, 2, 60)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("OK"))
+	}))
+
+	// Request coming from trusted proxy (10.0.0.1) on behalf of client 192.168.1.100
+	for i := 1; i <= 2; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+		req.RemoteAddr = "10.0.0.1:54321"
+		req.Header.Set("CF-Connecting-IP", "192.168.1.100")
+		rec := httptest.NewRecorder()
+
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Trusted proxy request %d expected 200 OK, got: %d", i, rec.Code)
+		}
+	}
+
+	// 3rd request from same client via trusted proxy is rate-limited
+	req3 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+	req3.RemoteAddr = "10.0.0.1:54321"
+	req3.Header.Set("CF-Connecting-IP", "192.168.1.100")
+	rec3 := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec3, req3)
+	if rec3.Code != http.StatusTooManyRequests {
+		t.Fatalf("3rd request expected 429 Too Many Requests, got: %d", rec3.Code)
+	}
+
+	// But a different client IP via the same trusted proxy is allowed
+	reqDifferent := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+	reqDifferent.RemoteAddr = "10.0.0.1:54321"
+	reqDifferent.Header.Set("CF-Connecting-IP", "192.168.1.200")
+	recDifferent := httptest.NewRecorder()
+
+	handler.ServeHTTP(recDifferent, reqDifferent)
+	if recDifferent.Code != http.StatusOK {
+		t.Fatalf("Different client via trusted proxy expected 200 OK, got: %d", recDifferent.Code)
+	}
+}
+
+type errorRateLimiter struct{}
+
+func (e *errorRateLimiter) Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error) {
+	return false, errors.New("redis connection failure")
+}
+
+func TestRateLimitMiddleware_LimiterErrorReturns503(t *testing.T) {
+	limiter := &errorRateLimiter{}
+	handler := middleware.RateLimitMiddleware(limiter, 10, 60)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("Expected 503 Service Unavailable on rate limiter store failure, got: %d (%s)", rec.Code, rec.Body.String())
+	}
+}
+```
+
+---
+
 ## pkg/middleware/rbac.go
 
 ```go
@@ -3360,11 +4212,21 @@ type BaseRepository struct {
 	Dialect      string
 }
 
-// NewBaseRepository creates a new BaseRepository with a direct ent.Client.
+// NewBaseRepository creates a new BaseRepository with a direct ent.Client, automatically detecting any underlying *sql.DB and SQL dialect.
 func NewBaseRepository(masterClient *ent.Client) *BaseRepository {
-	return &BaseRepository{
+	repo := &BaseRepository{
 		MasterClient: masterClient,
 	}
+	if masterClient != nil {
+		drv := masterClient.Driver()
+		if dbGetter, ok := drv.(interface{ DB() *sql.DB }); ok {
+			repo.SQLDB = dbGetter.DB()
+		}
+		if dialectGetter, ok := drv.(interface{ Dialect() string }); ok {
+			repo.Dialect = dialectGetter.Dialect()
+		}
+	}
+	return repo
 }
 
 // NewBaseRepositoryWithDB creates a new BaseRepository by wrapping an existing *sql.DB connection pool.
@@ -3434,6 +4296,77 @@ func (r *BaseRepository) Transaction(ctx context.Context, fn func(tx *ent.Tx) er
 	}
 	return nil
 }
+
+// CreateCapabilityTables creates the SQL capability tables (gs_locks, gs_replays, gs_revocations) for the specified database dialect.
+func CreateCapabilityTables(ctx context.Context, db *sql.DB, dialect string) error {
+	if db == nil {
+		return nil
+	}
+
+	var ddl string
+	switch dialect {
+	case "sqlite", "sqlite3":
+		ddl = `
+		CREATE TABLE IF NOT EXISTS gs_locks (
+			lock_key TEXT PRIMARY KEY,
+			owner_token TEXT NOT NULL,
+			expires_at DATETIME NOT NULL,
+			acquired_at DATETIME NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS gs_replays (
+			nonce_key TEXT PRIMARY KEY,
+			expires_at DATETIME NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS gs_revocations (
+			institution_id TEXT NOT NULL,
+			user_id TEXT NOT NULL,
+			token_version INTEGER NOT NULL DEFAULT 1,
+			revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (institution_id, user_id)
+		);`
+	case "mysql", "mariadb":
+		ddl = `
+		CREATE TABLE IF NOT EXISTS gs_locks (
+			lock_key VARCHAR(255) PRIMARY KEY,
+			owner_token VARCHAR(64) NOT NULL,
+			expires_at DATETIME(6) NOT NULL,
+			acquired_at DATETIME(6) NOT NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+		CREATE TABLE IF NOT EXISTS gs_replays (
+			nonce_key VARCHAR(255) PRIMARY KEY,
+			expires_at DATETIME(6) NOT NULL
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+		CREATE TABLE IF NOT EXISTS gs_revocations (
+			institution_id VARCHAR(36) NOT NULL,
+			user_id VARCHAR(36) NOT NULL,
+			token_version INT NOT NULL DEFAULT 1,
+			revoked_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+			PRIMARY KEY (institution_id, user_id)
+		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
+	default: // postgres, pgx
+		ddl = `
+		CREATE TABLE IF NOT EXISTS gs_locks (
+			lock_key VARCHAR(255) PRIMARY KEY,
+			owner_token VARCHAR(64) NOT NULL,
+			expires_at TIMESTAMPTZ NOT NULL,
+			acquired_at TIMESTAMPTZ NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS gs_replays (
+			nonce_key VARCHAR(255) PRIMARY KEY,
+			expires_at TIMESTAMPTZ NOT NULL
+		);
+		CREATE TABLE IF NOT EXISTS gs_revocations (
+			institution_id UUID NOT NULL,
+			user_id UUID NOT NULL,
+			token_version INTEGER NOT NULL DEFAULT 1,
+			revoked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (institution_id, user_id)
+		);`
+	}
+
+	_, err := db.ExecContext(ctx, ddl)
+	return err
+}
 ```
 
 ---
@@ -3453,8 +4386,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
@@ -3482,25 +4415,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	}
 
 	// Create capability tables for lock, replay, revocation
-	var ddl string
-	switch dialectName {
-	case "sqlite", "sqlite3":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (lock_key TEXT PRIMARY KEY, owner_token TEXT NOT NULL, expires_at DATETIME NOT NULL, acquired_at DATETIME NOT NULL);
-		CREATE TABLE IF NOT EXISTS gs_replays (nonce_key TEXT PRIMARY KEY, expires_at DATETIME NOT NULL);
-		CREATE TABLE IF NOT EXISTS gs_revocations (institution_id TEXT NOT NULL, user_id TEXT NOT NULL, token_version INTEGER NOT NULL DEFAULT 1, revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (institution_id, user_id));`
-	case "mysql", "mariadb":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (lock_key VARCHAR(255) PRIMARY KEY, owner_token VARCHAR(64) NOT NULL, expires_at DATETIME(6) NOT NULL, acquired_at DATETIME(6) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_replays (nonce_key VARCHAR(255) PRIMARY KEY, expires_at DATETIME(6) NOT NULL) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_revocations (institution_id VARCHAR(36) NOT NULL, user_id VARCHAR(36) NOT NULL, token_version INT NOT NULL DEFAULT 1, revoked_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6), PRIMARY KEY (institution_id, user_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
-	default: // postgres
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (lock_key VARCHAR(255) PRIMARY KEY, owner_token VARCHAR(64) NOT NULL, expires_at TIMESTAMPTZ NOT NULL, acquired_at TIMESTAMPTZ NOT NULL);
-		CREATE TABLE IF NOT EXISTS gs_replays (nonce_key VARCHAR(255) PRIMARY KEY, expires_at TIMESTAMPTZ NOT NULL);
-		CREATE TABLE IF NOT EXISTS gs_revocations (institution_id UUID NOT NULL, user_id UUID NOT NULL, token_version INTEGER NOT NULL DEFAULT 1, revoked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP, PRIMARY KEY (institution_id, user_id));`
-	}
-	if _, err := db.ExecContext(ctx, ddl); err != nil {
+	if err := repository.CreateCapabilityTables(ctx, db, dialectName); err != nil {
 		t.Fatalf("[%s] Capability DDL execution failed: %v", dialectName, err)
 	}
 
@@ -4952,18 +5867,27 @@ func LoadJWTKeysFromEnv() error {
 	return InitJWTKeys(privPEM, pubPEM)
 }
 
-// SetupTestRSAKeys generates and initializes an ephemeral RSA 2048-bit keypair for test suites.
-func SetupTestRSAKeys() error {
+// GenerateRSAKeypairPEM generates a new RSA 2048-bit keypair and returns both in PEM encoding.
+func GenerateRSAKeypairPEM() ([]byte, []byte, error) {
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	privPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privKey)})
 	pubBytes, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+	return privPEM, pubPEM, nil
+}
+
+// SetupTestRSAKeys generates and initializes an ephemeral RSA 2048-bit keypair for test suites.
+func SetupTestRSAKeys() error {
+	privPEM, pubPEM, err := GenerateRSAKeypairPEM()
+	if err != nil {
+		return err
+	}
 	return InitJWTKeys(privPEM, pubPEM)
 }
 
@@ -5628,6 +6552,18 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 		return uuid.Nil, "", ErrSupportGrantInvalid
 	}
 
+	// Defense-in-depth: token_hash uniqueness makes a mismatch impossible under the current token format,
+	// but this check ensures any future change to token generation cannot silently reintroduce a cross-institution trust gap.
+	if grant.InstitutionID != instID {
+		if s.auditRepo != nil {
+			_, _ = s.auditRepo.LogSecurityEvent(ctx, grant.InstitutionID, agentUserID,
+				"SUPPORT_LOGIN_INSTITUTION_MISMATCH",
+				fmt.Sprintf("Token-derived institution ID %s did not match grant record institution ID %s — possible token tampering", instID, grant.InstitutionID),
+				nil)
+		}
+		return uuid.Nil, "", ErrSupportGrantInvalid
+	}
+
 	if err := s.supportGrantRepo.MarkGrantAsUsed(ctx, grant.ID); err != nil {
 		if errors.Is(err, repository.ErrGrantAlreadyUsed) {
 			return uuid.Nil, "", ErrSupportGrantInvalid
@@ -5636,12 +6572,12 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 	}
 
 	if s.auditRepo != nil {
-		_, _ = s.auditRepo.LogSecurityEvent(ctx, instID, agentUserID, "SUPPORT_ACCESS_LOGGED_IN", fmt.Sprintf("Support login executed by agent %s via active grant with scope %s", agentUserID.String(), grant.Scope), nil)
+		_, _ = s.auditRepo.LogSecurityEvent(ctx, grant.InstitutionID, agentUserID, "SUPPORT_ACCESS_LOGGED_IN", fmt.Sprintf("Support login executed by agent %s via active grant with scope %s", agentUserID.String(), grant.Scope), nil)
 	}
 
 	jwtToken, err := security.GenerateJWTWithScope(
 		agentUserID.String(),
-		instID.String(),
+		grant.InstitutionID.String(),
 		"SUPPORT_AGENT",
 		grant.Scope,
 		4*time.Hour,
@@ -5653,7 +6589,7 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 	if s.webhookDispatcher != nil {
 		s.webhookDispatcher.DispatchAsync(webhook.NewWebhookEvent(
 			"grant.claimed",
-			instID.String(),
+			grant.InstitutionID.String(),
 			agentUserID.String(),
 			map[string]any{
 				"grant_id": grant.ID.String(),
@@ -5663,7 +6599,7 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 		))
 	}
 
-	return instID, jwtToken, nil
+	return grant.InstitutionID, jwtToken, nil
 }
 
 // RevokeSupportGrant invalidates all active support grants for an institution.
@@ -6028,10 +6964,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// DefaultMaxConcurrentWebhooks limits simultaneous outbound HTTP webhook delivery goroutines.
+const DefaultMaxConcurrentWebhooks = 25
 
 // WebhookEvent represents an event payload dispatched to registered subscriber webhooks.
 type WebhookEvent struct {
@@ -6060,9 +7000,13 @@ type WebhookDispatcher struct {
 	webhookURL string
 	secretKey  string
 	client     *http.Client
+	sem        chan struct{}
+	wg         sync.WaitGroup
+	mu         sync.RWMutex
+	closed     bool
 }
 
-// NewWebhookDispatcher creates a new WebhookDispatcher instance.
+// NewWebhookDispatcher creates a new WebhookDispatcher instance with bounded worker capacity.
 func NewWebhookDispatcher(webhookURL, secretKey string) *WebhookDispatcher {
 	return &WebhookDispatcher{
 		webhookURL: webhookURL,
@@ -6070,6 +7014,7 @@ func NewWebhookDispatcher(webhookURL, secretKey string) *WebhookDispatcher {
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
+		sem: make(chan struct{}, DefaultMaxConcurrentWebhooks),
 	}
 }
 
@@ -6085,8 +7030,8 @@ func (d *WebhookDispatcher) ComputeSignature(payload []byte) string {
 
 // Dispatch sends a webhook event synchronously with HMAC-SHA256 signature authentication.
 func (d *WebhookDispatcher) Dispatch(ctx context.Context, event *WebhookEvent) error {
-	if d.webhookURL == "" {
-		return nil // No-op if webhook is not configured
+	if d.webhookURL == "" || d.secretKey == "" {
+		return nil // No-op if webhook URL or signing secret is not configured
 	}
 
 	payload, err := json.Marshal(event)
@@ -6104,7 +7049,8 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, event *WebhookEvent) e
 	req.Header.Set("X-GrantSupport-Event", event.EventType)
 	req.Header.Set("X-GrantSupport-Delivery", event.ID)
 
-	if signature := d.ComputeSignature(payload); signature != "" {
+	signature := d.ComputeSignature(payload)
+	if signature != "" {
 		req.Header.Set("X-GrantSupport-Signature", signature)
 	}
 
@@ -6121,18 +7067,35 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, event *WebhookEvent) e
 	return nil
 }
 
-// DispatchAsync sends a webhook event asynchronously in a background goroutine.
+// DispatchAsync sends a webhook event asynchronously with bounded concurrency and shutdown tracking.
 func (d *WebhookDispatcher) DispatchAsync(event *WebhookEvent) {
-	if d.webhookURL == "" {
+	if d.webhookURL == "" || d.secretKey == "" {
 		return
 	}
 
+	d.mu.RLock()
+	if d.closed {
+		d.mu.RUnlock()
+		slog.Warn("Webhook dispatch skipped: dispatcher is closed",
+			slog.String("event_type", event.EventType),
+			slog.String("event_id", event.ID),
+		)
+		return
+	}
+	d.wg.Add(1)
+	d.mu.RUnlock()
+
 	go func() {
+		defer d.wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("Webhook async dispatch panic recovered", slog.Any("panic", r))
 			}
 		}()
+
+		// Acquire worker slot from bounded semaphore channel
+		d.sem <- struct{}{}
+		defer func() { <-d.sem }()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -6145,6 +7108,26 @@ func (d *WebhookDispatcher) DispatchAsync(event *WebhookEvent) {
 			)
 		}
 	}()
+}
+
+// Close gracefully waits for in-flight async webhook deliveries to complete or until the context expires.
+func (d *WebhookDispatcher) Close(ctx context.Context) error {
+	d.mu.Lock()
+	d.closed = true
+	d.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 ```
 
@@ -6384,6 +7367,73 @@ func TestGrantOperationIsolationFromWebhookFailure(t *testing.T) {
 		t.Fatalf("Audit chain was corrupted after webhook failure: valid=%v, err=%v", valid, err)
 	}
 }
+
+func TestWebhookDispatcher_BoundedConcurrencyAndDrain(t *testing.T) {
+	var handledCount int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(20 * time.Millisecond) // Simulate network latency
+		atomic.AddInt64(&handledCount, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	dispatcher := webhook.NewWebhookDispatcher(server.URL, "secret")
+
+	const totalEvents = 50
+	for i := 0; i < totalEvents; i++ {
+		event := webhook.NewWebhookEvent("grant.created", "inst-1", "admin-1", map[string]any{"index": i})
+		dispatcher.DispatchAsync(event)
+	}
+
+	// Drain dispatcher with 5-second timeout context
+	drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := dispatcher.Close(drainCtx); err != nil {
+		t.Fatalf("dispatcher.Close failed: %v", err)
+	}
+
+	if atomic.LoadInt64(&handledCount) != int64(totalEvents) {
+		t.Fatalf("Expected all %d async events to be drained, got %d", totalEvents, atomic.LoadInt64(&handledCount))
+	}
+
+	// Post-close dispatch must be rejected cleanly without panic
+	postCloseEvent := webhook.NewWebhookEvent("grant.revoked", "inst-1", "admin-1", nil)
+	dispatcher.DispatchAsync(postCloseEvent)
+	if atomic.LoadInt64(&handledCount) != int64(totalEvents) {
+		t.Fatalf("Event dispatched after Close should not execute, count=%d", atomic.LoadInt64(&handledCount))
+	}
+}
+
+func TestWebhookDispatch_MissingSecretDoesNotSendUnsignedWebhook(t *testing.T) {
+	var receivedRequests int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&receivedRequests, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// Dispatcher configured with endpoint but EMPTY secret key
+	dispatcher := webhook.NewWebhookDispatcher(server.URL, "")
+
+	event := webhook.NewWebhookEvent("grant.created", "inst-1", "admin-1", map[string]any{"test": true})
+
+	// Synchronous dispatch must be a no-op (no unsigned request sent)
+	err := dispatcher.Dispatch(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Expected nil error on no-op dispatch with missing secret, got: %v", err)
+	}
+
+	// Asynchronous dispatch must also be a no-op
+	dispatcher.DispatchAsync(event)
+	time.Sleep(100 * time.Millisecond)
+
+	if atomic.LoadInt64(&receivedRequests) != 0 {
+		t.Fatalf("Expected 0 requests sent when secret is missing, got %d (unsigned webhooks are prohibited)", atomic.LoadInt64(&receivedRequests))
+	}
+}
 ```
 
 ---
@@ -6506,12 +7556,12 @@ info:
   title: GrantSupport Engine API
   version: 1.0.0
   description: >
-    GrantSupport is an open-source, delegated support-access authentication and authorization engine.
+    GrantSupport is a delegated support-access authentication and cryptographic audit engine.
     It enables multi-tenant SaaS applications to issue cryptographically signed, time-bounded,
-    single-use support access tokens to vendor support agents with immutable audit logging.
+    single-use support access tokens to vendor support agents with tamper-evident audit logging.
   license:
-    name: Apache-2.0
-    url: https://www.apache.org/licenses/LICENSE-2.0.html
+    name: BSL-1.1
+    url: https://raw.githubusercontent.com/Azharyoosuf/GrantSupport/main/LICENSE
 
 servers:
   - url: http://localhost:8080
@@ -6592,7 +7642,8 @@ paths:
     post:
       summary: Revoke Active Support Grants
       description: >
-        Called by a customer administrator to immediately invalidate all pending or active support grants for their tenant.
+        Called by a customer administrator to immediately invalidate all pending or active unredeemed support grants for their tenant.
+        Prevents unredeemed grants from being claimed; already-issued active support sessions have their own JWT lifetime.
       security:
         - BearerAuth: []
       responses:
@@ -6618,7 +7669,7 @@ components:
       type: apiKey
       in: header
       name: X-Signature
-      description: 5-layer Ed25519 dual-key asymmetric request signature.
+      description: Opt-in 5-layer Ed25519 dual-key asymmetric request signature for custom machine-to-machine routes.
 
   schemas:
     HealthResponse:
@@ -6712,6 +7763,18 @@ components:
           type: string
           description: 4-hour RS256 signed access token for support operations.
           example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+        access_token:
+          type: string
+          description: Snake_case alias for accessToken.
+          example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+        data:
+          type: object
+          properties:
+            institution_id:
+              type: string
+              format: uuid
+            access_token:
+              type: string
       required:
         - success
         - message
@@ -7107,135 +8170,173 @@ CREATE TABLE IF NOT EXISTS gs_revocations (
 ```markdown
 # Technical Architecture & Security Specification
 
-This document details the architectural design, cryptographic primitives, zero-data-liability principles, threat model, and immutability guarantees of **GrantSupport**.
+This document details the architectural design, cryptographic primitives, threat model, database portability, and audit verification guarantees of **GrantSupport**.
 
 ---
 
-## 1. Architectural Philosophy: Control-Plane vs. Data-Plane
+## 1. System Architecture: Standalone vs. Embedded Engine
 
-GrantSupport separates system responsibilities into two strictly isolated boundaries:
+GrantSupport is architectured to operate in two distinct modes without architectural compromise:
 
 ```
-┌────────────────────────────────────────────────────────────────────────────────┐
-│                    CONTROL PLANE (Your SaaS Infrastructure)                    │
-│                                                                                │
-│  - Issues signed cryptographic license keys (Ed25519)                          │
-│  - Hosts JWKS public keys at /.well-known/jwks.json                            │
-│  - Receives light telemetry heartbeats (IP, machine ID, active agent count)    │
-│  - ZERO customer data storage (NO user profiles, NO financial ledgers, NO PII) │
-└────────────────────────────────────────────────────────────────────────────────┘
-                                      ▲
-                                      │  Public Key Verification & Heartbeat Ping
-                                      ▼
-┌────────────────────────────────────────────────────────────────────────────────┐
-│                   DATA PLANE (Customer Cloud / Docker / VPC)                   │
-│                                                                                │
-│  - Hosts customer PostgreSQL database and Valkey cache                         │
-│  - Stores user profiles, application data, and SupportGrant records             │
-│  - Executes local seat enforcement (Human & AI Agent limits)                   │
-│  - Maintains append-only SHA-256 hash-chained AuditEvent ledger               │
-└────────────────────────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 STANDALONE MICROSERVICE                                │
+│                                                                                        │
+│   HTTP Client (Python, Node, Java, Go, C#, Rust) ──► Chi Router (:8085)                │
+│                                                            │                           │
+│                                                            ▼                           │
+│                                                SupportGrantController                  │
+│                                                            │                           │
+│                                                            ▼                           │
+│                                                   GrantSupportService                  │
+│                                                      │             │                   │
+│                              ┌───────────────────────┘             └─────────┐         │
+│                              ▼                                               ▼         │
+│                    SupportGrantRepository                         SecurityAuditRepo   │
+│                              │                                               │         │
+│                              ▼                                               ▼         │
+│                     Ent ORM / Database Pool (PostgreSQL, MySQL, MariaDB, SQLite)       │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                              EMBEDDED GO IN-PROCESS ENGINE                             │
+│                                                                                        │
+│   Host Go Application ──► grantsupport.NewEngine(WithDB(db, "postgres"))               │
+│                                  │                                                     │
+│        ┌─────────────────────────┴─────────────────────────┐                           │
+│        ▼                                                   ▼                           │
+│   Direct Go Engine API (In-Process)              engine.HTTPHandler()                  │
+│   engine.CreateSupportGrant(...)                 Mounted under host router /api/v1/... │
+│   engine.SupportLogin(...)                                                             │
+│   engine.VerifyAuditChain(...)                                                         │
+└────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Strategic Benefits:
-1. **Zero Customer PII Exposure**: Your infrastructure never sees or stores customer passwords, emails, tenant data, or application records.
-2. **Infinite Horizontal Scale**: Your SaaS server only serves small JSON payloads for JWKS key rotation and daily heartbeats.
-3. **SOC 2 & Compliance Ready**: Customers retain total ownership over their audit trail and data residency requirements.
+### Strategic Architectural Principles:
+1. **Zero External Dependencies Required**: Operates with a single SQL database:
+   - **PostgreSQL**: Reference and primary production database.
+   - **MySQL (8.0+) & MariaDB (10.5+)**: Supported enterprise relational database alternatives.
+   - **SQLite**: Supported for single-process embedded applications, local development, and test suites (not distributed across multi-container replicas).
+2. **Valkey & Redis Officially Supported**: Distributed caching and locking officially support **Valkey** and **Redis** (other Redis-protocol-compatible implementations may work but are not officially verified or supported). System operates fully without Redis/Valkey by falling back to SQL database tables or in-memory stores.
+3. **Zero Connection Leakage**: Reuses caller-managed `*sql.DB`, `*ent.Client`, or `*pgxpool.Pool` connection pools without creating secondary pools.
+4. **Zero Telemetry / Zero Phone-Home**: Contains no license servers, no heartbeat pings, no seat enforcement counters, and no remote telemetry.
+5. **Tenant Isolation by Construction**: Every repository query enforces strict `institution_id` scoping.
 
 ---
 
-## 2. Cryptographic License Verification (Ed25519)
+## 2. Delegation Token Lifecycle & Security Control Flow
 
-Licenses are issued as base64-encoded, Ed25519-signed JSON Web Tokens (JWL):
-
-### 2.1 License Payload Structure
-```json
-{
-  "lic_id": "lic_994821a_2026",
-  "customer_id": "cust_acme_corp",
-  "domain_lock": "app.acmecorp.com",
-  "max_human_agents": 10,
-  "max_ai_agents": 5,
-  "tier": "PRO_10",
-  "issued_at": 1753880400,
-  "expires_at": 1785416400,
-  "offline_grace_days": 7
-}
-```
-
-### 2.2 Local Verification Workflow (Inside Customer's Container)
-1. At startup, `license.Manager` reads `LICENSE_KEY` from the environment.
-2. The payload and signature are unmarshaled.
-3. The signature is verified against your Ed25519 public key (`security.VerifyEd25519Signature(pubKey, payloadBytes, sigBytes)`).
-4. If valid, license metadata is stored in Valkey with a TTL matching `expires_at`.
-
----
-
-## 3. Delegation Token Mechanics & Security Control Flow
-
-GrantSupport implements **Delegated Authorization with Ephemeral Tokens**:
+GrantSupport implements **Delegated Support Access with Single-Use Ephemeral Tokens**:
 
 ```
-[Customer Admin] ──1. POST /auth/support/grant (duration: 60m)──► [GrantSupport Core]
-                                                                        │
-                                                            2. Generate Raw Token
-                                                            3. Save SHA-256(Token) in DB
-                                                                        │
-[Support Agent] ◄──4. Returns raw Token (inst_99812_a8b9...)──────────┘
+[Customer Admin] ──1. POST /api/v1/auth/support/grant (duration: 60m, scope: BILLING_ONLY)──► [GrantSupport]
+                                                                                                  │
+                                                                                    2. crypto/rand 32 bytes
+                                                                                    3. rawToken = {instID}_{rand}
+                                                                                    4. Store SHA-256(rawToken)
+                                                                                    5. Log SUPPORT_ACCESS_GRANTED
+                                                                                    6. Dispatch webhook (grant.created)
+                                                                                                  │
+[Support Agent] ◄──7. Returns rawToken (only returned once, never persisted)─────────────────────┘
        │
-       ├──5. POST /auth/support/login (Token)──────────────────► [GrantSupport Core]
-                                                                        │
-                                                            6. Verify SHA-256(Token)
-                                                            7. Check Expiration & Usage
-                                                            8. Mark Token Used (One-Time)
-                                                            9. Issue 4h SUPPORT_AGENT JWT
-                                                                        │
-                                                            10. Write AuditEvent Log
+       ├──8. POST /api/v1/auth/support/login (rawToken, agentId)───────────────────► [GrantSupport]
+                                                                                                  │
+                                                                                    9. Verify SHA-256(rawToken)
+                                                                                    10. Check ExpiresAt > NOW()
+                                                                                    11. Atomic CAS UPDATE (is_used=true)
+                                                                                    12. Issue RS256 JWT (4h, SUPPORT_AGENT)
+                                                                                    13. Log SUPPORT_ACCESS_LOGGED_IN
+                                                                                    14. Dispatch webhook (grant.claimed)
+                                                                                                  │
+[Support Agent] ◄──15. Returns RS256 JWT (scoped to InstitutionID & Role: SUPPORT_AGENT)──────────┘
 ```
 
-### Security Properties:
-* **One-Time Usage**: Once `SupportLogin` consumes a grant token, `is_used` is set to `true`. Further login attempts with the same token are rejected (`401 SUPPORT_GRANT_INVALID`).
-* **Time-Bound Expiration**: Grants automatically expire after the requested duration (e.g. 15m, 1h, 4h).
-* **Instant Manual Revocation**: End-users can trigger `POST /auth/support/revoke` at any time, immediately invalidating active tokens and bumping user `TokenVersion`.
+### Security Guarantees:
+* **High Entropy**: 256 bits of cryptographic entropy (`crypto/rand`) per token.
+* **Hashed at Rest**: Only the SHA-256 hash of the token is stored in the database. Raw tokens are never persisted.
+* **Atomic Single-Use Consumption**: Token redemption uses an atomic conditional predicate:
+  ```sql
+  UPDATE support_grants
+  SET is_used = true, used_at = CURRENT_TIMESTAMP
+  WHERE id = ? AND is_used = false;
+  ```
+  If concurrent requests attempt to claim the same grant token, exactly one succeeds and all other requests fail (`ErrGrantAlreadyUsed`).
+* **Time-Bound Expiration**: Grants carry strict TTLs (1 to 1440 minutes). Expired tokens are rejected at query and service layers.
+* **Grant Revocation vs. Session Revocation Semantics**:
+  - `POST /api/v1/auth/support/revoke` immediately invalidates all **unredeemed support grants** for the tenant by setting `expires_at = NOW()`.
+  - An **already-issued support session** holds an RS256 JWT with its own 4-hour lifetime and is governed by standard JWT expiration and the configured `RevocationStore`.
 
 ---
 
-## 4. Tamper-Evident Ledger & Append-Only Database Triggers
+## 3. Cryptographically Chained, Tamper-Evident Audit Ledger
 
-Audit integrity is guaranteed at the database level using PL/pgSQL triggers and SHA-256 hash chains.
+Every support access lifecycle event is recorded in a cryptographically linked, append-only audit ledger:
 
-### 4.1 SHA-256 Hash Chaining Formula
-For every `AuditEvent` and `FinanceLedger` entry $E_n$:
-$$\text{Hash}_n = \text{SHA256}(\text{Hash}_{n-1} \parallel \text{EventType} \parallel \text{ActorID} \parallel \text{InstitutionID} \parallel \text{Timestamp})$$
+### 3.1 SHA-256 Hash Chaining Formula
+For every `AuditEvent` entry $E_n$:
+$$\text{Hash}_n = \text{SHA256}(\text{Hash}_{n-1} \parallel \text{InstitutionID} \parallel \text{ActorID} \parallel \text{EventType} \parallel \text{SanitizedDescription} \parallel \text{TimestampNanos})$$
 
-### 4.2 Database Immutability Trigger
-```sql
-CREATE OR REPLACE FUNCTION prevent_auditevent_mutation()
-RETURNS TRIGGER AS $$
-BEGIN
-    RAISE EXCEPTION 'IMMUTABLE_AUDIT: AuditEvent records are append-only and cannot be modified or deleted';
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_prevent_auditevent_update
-    BEFORE UPDATE ON "AuditEvent"
-    FOR EACH ROW EXECUTE FUNCTION prevent_auditevent_mutation();
-
-CREATE TRIGGER trg_prevent_auditevent_delete
-    BEFORE DELETE ON "AuditEvent"
-    FOR EACH ROW EXECUTE FUNCTION prevent_auditevent_mutation();
 ```
+[Genesis Hash: 0000000000000000000000000000000000000000000000000000000000000000]
+                                   │
+                                   ▼
+[Event 1: SUPPORT_ACCESS_GRANTED] ──► Hash_1 = SHA256(Genesis || InstID || AdminID || ...)
+                                   │
+                                   ▼
+[Event 2: SUPPORT_ACCESS_LOGGED_IN] ─► Hash_2 = SHA256(Hash_1 || InstID || AgentID || ...)
+                                   │
+                                   ▼
+[Event 3: SUPPORT_ACCESS_REVOKED] ──► Hash_3 = SHA256(Hash_2 || InstID || AdminID || ...)
+```
+
+### 3.2 Audit Serialization & Tamper Detection
+* **Per-Institution In-Process Mutex Striping**: Serializes concurrent audit writes within a process to eliminate hash-chain forks without creating cross-tenant lock contention.
+* **Distributed Cross-Process Locking**: Attaches SQL or Redis distributed locks when running across multiple container replicas.
+* **Tamper Verification**: `VerifyAuditChain(ctx, institutionID)` re-computes every cryptographic hash link from genesis to tail. If any record was modified, deleted, or inserted out of sequence, verification fails and identifies the exact event ID of the violation.
 
 ---
 
-## 5. Threat Model & Countermeasures
+## 4. Automated PII & Credential Sanitization
+
+Before writing to the audit ledger, all textual descriptions and event metadata maps pass through `security.SanitizeAuditText()` and `security.SanitizeAuditMap()`. The sanitizer automatically redacts:
+* **Bearer Tokens & Passwords**: `bearer eyJ...` ➔ `Bearer [REDACTED_TOKEN]`
+* **Credit Cards (PAN)**: 13–19 digit sequences ➔ `[REDACTED_CARD]`
+* **Email Addresses**: RFC 5322 matching patterns ➔ `[REDACTED_EMAIL]`
+* **Phone Numbers**: E.164 and international formats ➔ `[REDACTED_PHONE]`
+
+---
+
+## 5. Capability Stores & Failure Policies
+
+GrantSupport provides pluggable capability adapters with explicit failure modes:
+
+| Capability | Valkey/Redis Adapter | SQL Adapter | In-Memory Fallback | Failure Policy |
+| :--- | :--- | :--- | :--- | :--- |
+| **Distributed Lock** | `RedisLockStore` (SETNX + Lua) | `SQLLockStore` (`gs_locks`) | `MemoryLockStore` (Mutex) | Rejects on timeout / contention |
+| **Replay Prevention** | `RedisReplayStore` (EXPIRE) | `SQLReplayStore` (`gs_replays`) | `MemoryReplayStore` (TTL Map) | **Fail-closed** (Rejects replay) |
+| **Token Revocation** | `RedisRevocationStore` (Version) | `SQLRevocationStore` (`gs_revocations`) | — | **Fail-closed** (503 on store error) |
+| **Rate Limiter** | `RedisRateLimiter` (INCR) | — | `MemoryRateLimiter` (Token Bucket) | **Fail-closed** (503 on store error) |
+
+---
+
+## 6. Optional Encryption & Key Management
+
+* **Local Encryption**: HKDF-derived per-tenant keys using SHA-256 master key + AES-256-GCM authenticated encryption.
+* **AWS KMS Envelope Encryption**: Optional AWS KMS provider using `GenerateDataKey` with tenant-scoped encryption contexts (`institutionId`).
+* *Scope*: Encryption infrastructure is provided as a utility for application-level data protection; it is not automatically applied to every database field.
+
+---
+
+## 7. Threat Model & Countermeasures
 
 | Threat Vector | Attack Scenario | Countermeasure |
 | :--- | :--- | :--- |
-| **Token Replay Attack** | Attacker intercepts a raw support grant token. | Single-use consumption flag (`is_used = true`) + short TTL (max 4h) + HTTPS TLS encryption. |
-| **Seat Multiplication** | Customer runs 10 containers to bypass a 3-agent limit. | Valkey distributed lock (`Redlock`) + shared PostgreSQL agent seat counter across container replicas. |
-| **License Tampering** | Customer modifies `max_human_agents` in the license JSON. | Ed25519 cryptographic signature check fails instantly on payload mutation. |
-| **DB Audit Modification** | Malicious DB admin attempts to delete support access logs. | PostgreSQL triggers block `UPDATE` and `DELETE` queries at database driver level. |
+| **Token Replay Attack** | Attacker intercepts a raw support grant token. | Single-use atomic CAS consumption flag (`is_used = true`) + bounded TTL (max 24h) + SHA-256 storage. |
+| **Cross-Tenant Access** | Tenant A attempts to claim or revoke Tenant B's grant. | Strict `institution_id` query scoping + token prefix defense-in-depth verification. |
+| **Algorithm Confusion** | Attacker presents an HMAC-signed token to RS256 verifier. | Explicit `SigningMethodRSA` type assertion check in `VerifyJWT()`. |
+| **Brute-Force Login** | Attacker attempts random token guessing on `/login`. | IP-based rate limiting (10 req/min/IP) with socket IP extraction and trusted proxy validation. |
+| **Audit Ledger Tampering** | Malicious DB operator modifies or deletes access logs. | SHA-256 cryptographic hash-chaining detected by `VerifyAuditChain()`. |
+| **Store Failure Bypass** | Redis or SQL store crashes during auth or rate limit check. | **Fail-closed** architecture: returns 503 / 401 rather than allowing unauthenticated or unthrottled access. |
 ```
 
 ---
@@ -7243,17 +8344,18 @@ CREATE TRIGGER trg_prevent_auditevent_delete
 ## docs/COMMERCIAL_MODELS.md
 
 ```markdown
-# Open-Source Architecture & Deployment Principles
+# Source-Available Architecture & Deployment Principles
 
-GrantSupport is a 100% open-source delegated support-access authentication and cryptographic audit engine.
+GrantSupport is a source-available (BSL 1.1) delegated support-access authentication and cryptographic audit engine.
 
 ---
 
-## 1. Open-Source Freedom & Guarantees
+## 1. Architectural Principles & Guarantees
 
-1. **Zero Proprietary Licensing**: No license keys, no seat limits, no human vs AI agent caps.
-2. **Zero Phone-Home / Telemetry**: No external heartbeat pings, no machine fingerprinting, no mandatory external cloud services.
+1. **Zero Runtime Enforcement / License Servers**: No license validation servers, no seat limits, no human vs AI agent caps, and no remote activation checks.
+2. **Zero Phone-Home / Telemetry**: No external heartbeat pings, no machine fingerprinting, and no mandatory external cloud services.
 3. **Customer Data Ownership**: All audit ledgers, support grants, and tenant access records remain entirely within the customer's self-hosted infrastructure.
+4. **Transparent Source Availability**: Licensed under the Business Source License 1.1 (BSL 1.1), converting automatically to Apache 2.0 on August 14, 2030.
 
 ---
 
@@ -7271,7 +8373,7 @@ docker run -d \
 ```
 
 ### High-Scale Distributed (Database + Optional Valkey/Redis)
-For high-traffic multi-container deployments, optionally attach Valkey/Redis for accelerated in-memory locking and caching:
+For high-traffic multi-container deployments, optionally attach Valkey/Redis for accelerated distributed locking, rate limiting, and token revocation:
 ```bash
 docker run -d \
   -e DATABASE_URL="postgres://user:pass@db:5432/grantsupport?sslmode=disable" \
@@ -7281,7 +8383,7 @@ docker run -d \
 ```
 
 ### Embedded Go Library
-Import GrantSupport directly into your Go application and reuse your existing `*sql.DB` or `*pgxpool.Pool` without running a separate service container.
+Import GrantSupport directly into your Go application and reuse your existing `*sql.DB`, `*ent.Client`, or `*pgxpool.Pool` without running a separate service container.
 ```
 
 ---
@@ -10911,7 +12013,26 @@ def generate_full_source():
     migration_files = []
     docs_files = []
     script_files = []
-    root_files = ["README.md", "Dockerfile", "docker-compose.yml", "go.mod", "go.sum"]
+    ci_files = []
+    root_files = [
+        "README.md",
+        "LICENSE",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "CHANGELOG.md",
+        ".gitignore",
+        ".dockerignore",
+        "Dockerfile",
+        "docker-compose.yml",
+        "go.mod",
+        "go.sum",
+    ]
+
+    if os.path.exists(os.path.join(REPO_ROOT, ".github", "workflows")):
+        for root, dirs, files in os.walk(os.path.join(REPO_ROOT, ".github", "workflows")):
+            for f in sorted(files):
+                rel = os.path.relpath(os.path.join(root, f), REPO_ROOT).replace(os.sep, "/")
+                ci_files.append(rel)
 
     for root, dirs, files in os.walk(os.path.join(REPO_ROOT, "cmd")):
         for f in sorted(files):
@@ -11014,6 +12135,12 @@ def generate_full_source():
             lines.append(f"- [{f}](#{make_anchor(f)})")
         lines.append("")
 
+    if ci_files:
+        lines.append("### .github/workflows/")
+        for f in ci_files:
+            lines.append(f"- [{f}](#{make_anchor(f)})")
+        lines.append("")
+
     if root_files:
         lines.append("### Root-level files")
         for f in root_files:
@@ -11032,6 +12159,7 @@ def generate_full_source():
         ("migrations", migration_files),
         ("docs", docs_files),
         ("scripts", script_files),
+        ("ci", ci_files),
         ("root", [f for f in root_files if os.path.exists(os.path.join(REPO_ROOT, f))])
     ]
 
@@ -11120,15 +12248,125 @@ if __name__ == "__main__":
 
 ---
 
+## .github/workflows/ci.yml
+
+```yaml
+name: GrantSupport CI Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  lint-and-test:
+    name: Build, Vet, Test & Race Detector Matrix
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: grantsupport
+          POSTGRES_PASSWORD: secretpassword
+          POSTGRES_DB: grantsupport
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: rootsecret
+          MYSQL_DATABASE: grantsupport
+          MYSQL_USER: grantsupport
+          MYSQL_PASSWORD: secretpassword
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -u grantsupport -psecretpassword"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      mariadb:
+        image: mariadb:11
+        env:
+          MARIADB_ROOT_PASSWORD: rootsecret
+          MARIADB_DATABASE: grantsupport
+          MARIADB_USER: grantsupport
+          MARIADB_PASSWORD: secretpassword
+        ports:
+          - 3307:3306
+        options: >-
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      valkey:
+        image: valkey/valkey:7.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "valkey-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+          cache: true
+
+      - name: Go Mod Tidy & Download
+        run: |
+          go mod tidy
+          go mod download
+
+      - name: Compile Verification (go build)
+        run: go build -v ./...
+
+      - name: Static Analysis (go vet)
+        run: go vet ./...
+
+      - name: Unit, Concurrency & Cross-Database Matrix Suite (go test)
+        env:
+          TEST_POSTGRES_URL: postgresql://grantsupport:secretpassword@localhost:5432/grantsupport?sslmode=disable
+          TEST_MYSQL_URL: grantsupport:secretpassword@tcp(localhost:3306)/grantsupport?parseTime=true
+          TEST_MARIADB_URL: grantsupport:secretpassword@tcp(localhost:3307)/grantsupport?parseTime=true
+          VALKEY_CACHE_URL: valkey://localhost:6379/0
+        run: go test -v -count=1 ./...
+
+      - name: Race Detection Suite (go test -race)
+        env:
+          TEST_POSTGRES_URL: postgresql://grantsupport:secretpassword@localhost:5432/grantsupport?sslmode=disable
+          TEST_MYSQL_URL: grantsupport:secretpassword@tcp(localhost:3306)/grantsupport?parseTime=true
+          TEST_MARIADB_URL: grantsupport:secretpassword@tcp(localhost:3307)/grantsupport?parseTime=true
+          VALKEY_CACHE_URL: valkey://localhost:6379/0
+        run: go test -v -race -count=1 ./...
+```
+
+---
+
 ## README.md
 
 ```markdown
 # GrantSupport 🛡️
 
-**Open-Source Delegated Support-Access Authentication & Cryptographic Audit Engine**
+**Source-Available Delegated Support-Access Authentication & Cryptographic Audit Engine**
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/grantsupport/grantsupport)](https://goreportcard.com/report/github.com/grantsupport/grantsupport)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1.0-green.svg)](api/openapi.yaml)
 
 GrantSupport solves the **"vendor support access problem"** for multi-tenant B2B SaaS platforms. Rather than creating permanent backdoors or sharing static credentials, GrantSupport allows customer administrators to delegate temporary, time-bounded, cryptographically signed, and tamper-audited access to vendor support engineers.
@@ -11138,23 +12376,31 @@ GrantSupport solves the **"vendor support access problem"** for multi-tenant B2B
 ## 🔒 Core Security & Architectural Guarantees
 
 1. **Two-Tier Authentication**:
-   - **Tier 1 (Grant Creation & Revocation)**: Protected by standard RS256 Bearer JWTs (`ADMIN` / `OPERATOR` roles).
-   - **Tier 2 (Grant Consumption)**: Support agents claim high-entropy single-use tokens, issuing a 4-hour `SUPPORT_AGENT` RS256 JWT with explicit tenant scoping.
+   - **Tier 1 (Grant Creation & Revocation)**: Protected by standard RS256 Bearer JWTs (`ADMIN` / `OPERATOR` roles). Revoking a grant prevents unredeemed tokens from being claimed.
+   - **Tier 2 (Grant Consumption)**: Support agents claim high-entropy single-use tokens, issuing a 4-hour `SUPPORT_AGENT` RS256 JWT with explicit tenant scoping. (An already-issued support session has its own JWT lifetime and is governed by JWT expiration and revocation store mechanisms).
 2. **Atomic Single-Use Consumption**:
    - Unconditional SQL conditional predicate (`UPDATE ... WHERE id = ? AND is_used = false`) prevents concurrent token double-claim race conditions across distributed instances.
 3. **Cryptographic SHA-256 Audit Ledger**:
-   - Every grant lifecycle event is recorded in an immutable, append-only ledger with SHA-256 hash-chaining.
+   - Every grant lifecycle event is recorded in a cryptographically chained, tamper-evident, append-only ledger with SHA-256 hash-chaining.
    - **Per-Institution Mutex Striping**: Prevents hash-chain interleaving under high concurrency while avoiding cross-tenant lock contention.
    - **Tamper Verification**: Built-in `VerifyAuditChain(ctx, institutionID)` detects any unauthorized database mutation.
 4. **Automated PII & Credential Sanitization**:
-   - Redacts bearer tokens, passwords, credit cards (PAN), emails, and phone numbers before logging to the immutable audit ledger.
+   - Redacts bearer tokens, passwords, credit cards (PAN), emails, and phone numbers before logging to the tamper-evident audit ledger.
 5. **Database Portability & Connection Pool Preservation**:
-   - Native support for **PostgreSQL**, **MySQL**, **MariaDB**, and **SQLite** (pure Go `modernc.org/sqlite`).
+   - **PostgreSQL**: Reference / primary production database.
+   - **MySQL (8.0+) & MariaDB (10.5+)**: Supported enterprise relational backends.
+   - **SQLite**: Supported for single-process, embedded applications, local development, and test suites (pure Go `modernc.org/sqlite`; not distributed across multi-container replicas).
    - Reuses caller-managed `*sql.DB` connection pools without creating secondary pools or leaking resources.
 6. **Valkey / Redis Optionality**:
-   - Distributed locking, replay prevention, and token revocation support both Valkey/Redis clusters and pure SQL/In-Memory fallback adapters.
+   - Distributed locking, replay prevention, and token revocation officially support **Valkey** and **Redis** (other Redis-protocol-compatible implementations may work but are not officially verified or supported).
+   - Operates fully without Redis/Valkey by automatically falling back to SQL database tables or in-process memory stores. Rate limiting without Redis operates on an in-memory token bucket per instance.
 7. **Signed Lifecycle Webhooks**:
    - Dispatches `grant.created`, `grant.claimed`, and `grant.revoked` webhook events with HMAC-SHA256 request signatures (`X-GrantSupport-Signature`).
+8. **Opt-In 5-Layer Machine-to-Machine Security (Go Embedders)**:
+   - Provides an optional 5-layer Ed25519 dual-key middleware (`engine.BulletproofMiddleware(keyStore)`) for Go embedders building custom machine-to-machine routes (timestamp freshness, nonce replay protection, Ed25519 signatures, and IP CIDR binding).
+   - *Note*: This is an **opt-in capability** for custom routes and is NOT applied to default HTTP endpoints (which use standard JWT bearer authentication and rate limiting). Callers must provide and manage their own key storage.
+9. **Data Encryption & Key Management Capabilities**:
+   - Provides optional AWS KMS envelope encryption and local HKDF AES-256-GCM encryption utilities for application-level data protection; encryption is not automatically applied to every database field.
 
 ---
 
@@ -11281,6 +12527,8 @@ Authorization: Bearer <Admin_JWT>
 }
 ```
 
+> **Note on Revocation Semantics**: Revoking a support grant immediately invalidates all unredeemed grants for the tenant, preventing future claims. An already-issued support session has its own JWT lifetime and is governed by standard JWT expiration and `RevocationStore` session revocation mechanisms.
+
 ---
 
 ## 🧪 Testing & Verification
@@ -11293,9 +12541,304 @@ go test -count=1 ./... -v
 
 ---
 
-## 📄 License
+## 📄 License & Commercial Terms
 
-GrantSupport is licensed under the [Apache License, Version 2.0](LICENSE).
+GrantSupport is licensed under the **[Business Source License 1.1 (BSL 1.1)](LICENSE)**.
+
+- **Free Tier**: Free of charge for personal use, educational use, non-commercial projects, evaluation, development, testing, and production use by individuals and small organizations.
+- **Commercial / Enterprise Tier**: Production use of GrantSupport by commercial corporations, enterprises, or multinational corporations (MNCs) requires a paid commercial license (**$199/month**) obtained directly from the Licensor.
+- **Open Source Transition**: On **August 14, 2030** (Change Date), the software automatically converts to the **Apache License, Version 2.0**.
+
+For commercial licensing inquiries: `licensing@grantsupport.io` (or repository maintainer).
+```
+
+---
+
+## LICENSE
+
+```text
+Business Source License 1.1
+
+Parameters:
+
+Licensor:             Azhar Yoosuf
+Licensed Work:        GrantSupport (including all software, source code, and documentation in this repository)
+Change Date:          August 14, 2030
+Change License:       Apache License, Version 2.0
+Additional Use Grant: You may make use of the Licensed Work free of charge for personal use, educational use, non-commercial projects, evaluation, development, testing, and production use by individuals and small organizations. Production use of the Licensed Work by commercial corporations, enterprises, or multinational corporations (MNCs) requires a paid commercial license ($199/month) obtained directly from the Licensor.
+
+================================================================================
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative works,
+redistribute, and make non-production and production use of the Licensed Work,
+subject to the terms of this License and the Additional Use Grant above.
+
+1. Grant of License
+   Subject to your compliance with the terms of this License, the Licensor hereby
+   grants to you a worldwide, non-exclusive, royalty-free (except as specified in
+   the Additional Use Grant), revocable (for breach) license to copy, modify, create
+   derivative works of, display, perform, and distribute the Licensed Work and any
+   derivative works thereof, solely in accordance with the Additional Use Grant.
+
+2. Additional Use Grant
+   Your use of the Licensed Work must comply with the Additional Use Grant specified
+   above. Any use of the Licensed Work that is not permitted under the Additional
+   Use Grant is strictly prohibited without obtaining a separate commercial license
+   agreement from the Licensor.
+
+3. Change Date and Change License
+   Effective on the Change Date specified above, this License shall automatically
+   terminate, and the Licensor hereby grants to you the right to copy, modify, create
+   derivative works of, display, perform, distribute, and make use of the Licensed
+   Work subject to the terms and conditions of the Change License specified above.
+   On and after the Change Date, the Licensed Work shall be governed exclusively by
+   the Change License without regard to the terms of this License.
+
+4. Intellectual Property Notices
+   You must reproduce all copyright, trademark, and other proprietary notices on
+   all copies and derivative works of the Licensed Work that you make or distribute.
+
+5. Disclaimer of Warranty
+   THE LICENSED WORK IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OR
+   CONDITIONS OF ANY KIND, EITHER EXPRESS OR IMPLIED, INCLUDING, WITHOUT LIMITATION,
+   ANY WARRANTIES OR CONDITIONS OF TITLE, NON-INFRINGEMENT, MERCHANTABILITY, OR
+   FITNESS FOR A PARTICULAR PURPOSE. YOU ARE SOLELY RESPONSIBLE FOR DETERMINING THE
+   APPROPRIATENESS OF USING OR REDISTRIBUTING THE LICENSED WORK AND ASSUME ANY RISKS
+   ASSOCIATED WITH YOUR EXERCISE OF PERMISSIONS UNDER THIS LICENSE.
+
+6. Limitation of Liability
+   IN NO EVENT AND UNDER NO LEGAL THEORY, WHETHER IN TORT (INCLUDING NEGLIGENCE),
+   CONTRACT, OR OTHERWISE, SHALL THE LICENSOR BE LIABLE TO YOU FOR DAMAGES,
+   INCLUDING ANY DIRECT, INDIRECT, SPECIAL, INCIDENTAL, OR CONSEQUENTIAL DAMAGES
+   OF ANY CHARACTER ARISING AS A RESULT OF THIS LICENSE OR OUT OF THE USE OR
+   INABILITY TO USE THE LICENSED WORK.
+```
+
+---
+
+## CONTRIBUTING.md
+
+```markdown
+# Contributing to GrantSupport
+
+Thank you for your interest in contributing to GrantSupport! We welcome bug reports, documentation improvements, and code contributions.
+
+---
+
+## Code of Conduct
+
+Please be respectful, constructive, and collaborative in all communications.
+
+---
+
+## Development Setup
+
+### Prerequisites
+
+- **Go**: Version `1.24` or later
+- **Git**
+- **Docker & Docker Compose** (optional, for local PostgreSQL/MySQL/Valkey integration testing)
+
+### Clone & Build
+
+```bash
+git clone https://github.com/Azharyoosuf/GrantSupport.git
+cd GrantSupport
+
+# Verify compilation
+go build ./...
+
+# Run static analysis
+go vet ./...
+```
+
+---
+
+## Testing Guidelines
+
+GrantSupport enforces strict test integrity:
+
+1. **Unit & Functional Tests**:
+   ```bash
+   go test -v -count=1 ./...
+   ```
+
+2. **Race Detection** (Mandatory before submitting PRs):
+   ```bash
+   go test -v -race -count=1 ./...
+   ```
+
+3. **Code Formatting**:
+   Ensure all Go files adhere to standard formatting:
+   ```bash
+   gofmt -w .
+   ```
+
+---
+
+## Submitting Pull Requests
+
+1. Fork the repository and create a descriptive feature branch:
+   ```bash
+   git checkout -b fix/issue-description
+   ```
+2. Commit your changes with clear, concise commit messages.
+3. Ensure all tests and race detector checks pass cleanly.
+4. Open a Pull Request targeting `main` with a summary of the change and associated test results.
+
+---
+
+## License
+
+By contributing to GrantSupport, you agree that your contributions will be licensed under the [Business Source License 1.1 (BSL 1.1)](LICENSE).
+```
+
+---
+
+## SECURITY.md
+
+```markdown
+# Security Policy
+
+## Supported Versions
+
+Only the latest release of GrantSupport receives active security updates.
+
+| Version | Supported          |
+| :---    | :---:              |
+| 1.0.x   | :white_check_mark: |
+| < 1.0   | :x:                |
+
+---
+
+## Reporting a Vulnerability
+
+If you discover a security vulnerability within GrantSupport, please **do NOT report it publicly on GitHub issues**.
+
+Instead, please responsibly disclose it via email or GitHub Private Vulnerability Reporting:
+
+- **Email**: `security@grantsupport.io` (or repository maintainer)
+- **GitHub**: Use the "Report a vulnerability" button under the **Security** tab of the repository.
+
+### What to Include
+
+Please provide:
+1. A description of the vulnerability and its potential impact.
+2. Step-by-step reproduction instructions or a minimal Proof of Concept (PoC).
+3. Any affected configurations or versions.
+
+### Response Timeline
+
+- **Initial Response**: Within 48 hours of receipt.
+- **Triage & Assessment**: Within 5 business days.
+- **Patch & Advisory Release**: Once a fix is verified and ready for deployment.
+```
+
+---
+
+## CHANGELOG.md
+
+```markdown
+# Changelog
+
+All notable changes to GrantSupport will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+## [1.0.0] - 2026-08-14
+
+### Initial Source-Available Release (BSL 1.1)
+
+#### Core Features
+- **Delegated Support Access**: High-entropy, single-use, time-bounded support delegation tokens for multi-tenant systems.
+- **Cryptographic Audit Ledger**: Append-only SHA-256 hash-chained security event audit logging with distributed lock serialization.
+- **Multi-Database Support**: Native compatibility with PostgreSQL 16, MySQL 8.4, MariaDB 11, and SQLite (pure Go).
+- **Valkey / Redis Optionality**: Distributed locking, replay nonces, and session revocation support Valkey with zero-dependency SQL fallbacks.
+- **Signed Lifecycle Webhooks**: Outbound HMAC-SHA256 event dispatching with bounded worker concurrency and graceful shutdown draining.
+- **Opt-In 5-Layer Machine-to-Machine Security**: Ed25519 asymmetric request signing, timestamp freshness, replay nonce tracking, and IP CIDR binding for custom embedded Go routes.
+- **PII & Credential Redaction**: Automated sanitization of credit cards, emails, bearer tokens, passwords, and phone numbers in audit trails.
+```
+
+---
+
+## .gitignore
+
+```text
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+/grantsupport
+
+# Test binary, built with `go test -c`
+*.test
+__debug_bin*
+
+# Output of the go coverage tool
+*.out
+coverage.html
+profile.out
+
+# Local environment & secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# SQLite database local test files
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Operating System files
+.DS_Store
+Thumbs.db
+Desktop.ini
+```
+
+---
+
+## .dockerignore
+
+```text
+.git
+.gitignore
+.dockerignore
+.agents
+.github
+*.md
+docs/
+scripts/
+bin/
+dist/
+*.db
+*.sqlite
+*.test
+coverage.out
+.env
+.env.*
 ```
 
 ---
@@ -11351,7 +12894,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - PORT=8080
       - DATABASE_DIALECT=postgres
       - DATABASE_URL=postgresql://grantsupport:secretpassword@postgres:5432/grantsupport?sslmode=disable
@@ -11381,7 +12924,7 @@ services:
     ports:
       - "8081:8080"
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - PORT=8080
       - DATABASE_DIALECT=mysql
       - DATABASE_URL=grantsupport:secretpassword@tcp(mysql:3306)/grantsupport?parseTime=true
@@ -11407,7 +12950,7 @@ services:
     ports:
       - "8082:8080"
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - PORT=8080
       - DATABASE_DIALECT=sqlite
       - DATABASE_URL=file:/data/grantsupport.db?cache=shared&_pragma=foreign_keys(1)&_fk=1&_pragma=busy_timeout(5000)
@@ -11504,9 +13047,9 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
-	github.com/jackc/pgx/v5 v5.6.0
-	github.com/redis/go-redis/v9 v9.5.3
-	golang.org/x/crypto v0.52.0
+	github.com/jackc/pgx/v5 v5.10.0
+	github.com/redis/go-redis/v9 v9.22.0
+	golang.org/x/crypto v0.55.0
 	modernc.org/sqlite v1.56.0
 )
 
@@ -11528,8 +13071,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.38.2 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sts v1.45.2 // indirect
 	github.com/aws/smithy-go v1.27.5 // indirect
-	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f // indirect
+	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.3 // indirect
 	github.com/go-openapi/inflect v0.19.0 // indirect
@@ -11538,21 +13080,21 @@ require (
 	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/hashicorp/hcl/v2 v2.13.0 // indirect
 	github.com/jackc/pgpassfile v1.0.0 // indirect
-	github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a // indirect
-	github.com/jackc/puddle/v2 v2.2.1 // indirect
+	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
+	github.com/jackc/puddle/v2 v2.2.2 // indirect
 	github.com/leodido/go-urn v1.4.0 // indirect
 	github.com/mattn/go-isatty v0.0.24 // indirect
 	github.com/mitchellh/go-wordwrap v0.0.0-20150314170334-ad45545899c7 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
 	github.com/rogpeppe/go-internal v1.15.0 // indirect
-	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/zclconf/go-cty v1.8.0 // indirect
-	golang.org/x/mod v0.37.0 // indirect
-	golang.org/x/net v0.54.0 // indirect
-	golang.org/x/sync v0.21.0 // indirect
+	go.uber.org/atomic v1.11.0 // indirect
+	golang.org/x/mod v0.38.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
-	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/text v0.41.0 // indirect
 	modernc.org/libc v1.74.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
@@ -11610,13 +13152,11 @@ github.com/bsm/ginkgo/v2 v2.12.0 h1:Ny8MWAHyOepLGlLKYmXG4IEkioBysk6GpaRTLC8zwWs=
 github.com/bsm/ginkgo/v2 v2.12.0/go.mod h1:SwYbGRRDovPVboqFv0tPTcG1sN61LM1Z4ARdbAV9g4c=
 github.com/bsm/gomega v1.27.10 h1:yeMWxP2pV2fG3FgAODIY8EiRE3dy0aeFYt4l7wh6yKA=
 github.com/bsm/gomega v1.27.10/go.mod h1:JyEr/xRbxbtgWNi8tIEVPUYZ5Dzef52k01W3YH0H+O0=
-github.com/cespare/xxhash/v2 v2.2.0 h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj44=
-github.com/cespare/xxhash/v2 v2.2.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
+github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
+github.com/cespare/xxhash/v2 v2.3.0/go.mod h1:VGX0DQ3Q6kWi7AoAeZDth3/j3BFtOZR5XLFGgcrjCOs=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
-github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f h1:lO4WD4F/rVNCu3HqELle0jiPLLBs70cWOduZpkS1E78=
-github.com/dgryski/go-rendezvous v0.0.0-20200823014737-9f7001d12a5f/go.mod h1:cuUVRXasLTGF7a8hSLbxyZXjz+1KgoB3wDUb6vlszIc=
 github.com/dustin/go-humanize v1.0.1 h1:GzkhY7T5VNhEkwH0PVJgjz+fX1rhBrR7pRT3mDkpeCY=
 github.com/dustin/go-humanize v1.0.1/go.mod h1:Mu1zIs6XwVuF/gI1OepvI0qD18qycQx+mFykh5fBlto=
 github.com/gabriel-vasile/mimetype v1.4.3 h1:in2uUcidCuFcDKtdcBxlR0rJ1+fsokWf+uqxgUFjbI0=
@@ -11654,12 +13194,14 @@ github.com/hashicorp/hcl/v2 v2.13.0 h1:0Apadu1w6M11dyGFxWnmhhcMjkbAiKCv7G1r/2QgC
 github.com/hashicorp/hcl/v2 v2.13.0/go.mod h1:e4z5nxYlWNPdDSNYX+ph14EvWYMFm3eP0zIUqPc2jr0=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=
 github.com/jackc/pgpassfile v1.0.0/go.mod h1:CEx0iS5ambNFdcRtxPj5JhEz+xB6uRky5eyVu/W2HEg=
-github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a h1:bbPeKD0xmW/Y25WS6cokEszi5g+S0QxI/d45PkRi7Nk=
-github.com/jackc/pgservicefile v0.0.0-20221227161230-091c0ba34f0a/go.mod h1:5TJZWKEWniPve33vlWYSoGYefn3gLQRzjfDlhSJ9ZKM=
-github.com/jackc/pgx/v5 v5.6.0 h1:SWJzexBzPL5jb0GEsrPMLIsi/3jOo7RHlzTjcAeDrPY=
-github.com/jackc/pgx/v5 v5.6.0/go.mod h1:DNZ/vlrUnhWCoFGxHAG8U2ljioxukquj7utPDgtQdTw=
-github.com/jackc/puddle/v2 v2.2.1 h1:RhxXJtFG022u4ibrCSMSiu5aOq1i77R3OHKNJj77OAk=
-github.com/jackc/puddle/v2 v2.2.1/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
+github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 h1:iCEnooe7UlwOQYpKFhBabPMi4aNAfoODPEFNiAnClxo=
+github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761/go.mod h1:5TJZWKEWniPve33vlWYSoGYefn3gLQRzjfDlhSJ9ZKM=
+github.com/jackc/pgx/v5 v5.10.0 h1:VhSvgU2jSli8o3AqIEOTJr7rZwAEUVo4E4XhR94Zfr0=
+github.com/jackc/pgx/v5 v5.10.0/go.mod h1:mal1tBGAFfLHvZzaYh77YS/eC6IX9OWbRV1QIIM0Jn4=
+github.com/jackc/puddle/v2 v2.2.2 h1:PR8nw+E/1w0GLuRFSmiioY6UooMp6KJv0/61nB7icHo=
+github.com/jackc/puddle/v2 v2.2.2/go.mod h1:vriiEXHvEE654aYKXXjOvZM39qJ0q+azkZFrfEOc3H4=
+github.com/klauspost/cpuid/v2 v2.2.10 h1:tBs3QSyvjDyFTq3uoc/9xFpCuOsJQFNPiAhYdw2skhE=
+github.com/klauspost/cpuid/v2 v2.2.10/go.mod h1:hqwkgyIinND0mEev00jJYCxPNVRVXFQeu1XKlok6oO0=
 github.com/kr/pretty v0.1.0/go.mod h1:dAy3ld7l9f0ibDNOQOHHMYYIIbhfbHSm3C4ZsoJORNo=
 github.com/kr/pretty v0.3.0 h1:WgNl7dwNpEZ6jJ9k1snq4pZsg7DOEN8hP9Xw0Tsjwk0=
 github.com/kr/pretty v0.3.0/go.mod h1:640gp4NfQd8pI5XOwp5fnNeVWj67G7CFk/SaSQn7NBk=
@@ -11681,8 +13223,8 @@ github.com/ncruces/go-strftime v1.0.0 h1:HMFp8mLCTPp341M/ZnA4qaf7ZlsbTc+miZjCLOF
 github.com/ncruces/go-strftime v1.0.0/go.mod h1:Fwc5htZGVVkseilnfgOVb9mKy6w1naJmn9CehxcKcls=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/redis/go-redis/v9 v9.5.3 h1:fOAp1/uJG+ZtcITgZOfYFmTKPE7n4Vclj1wZFgRciUU=
-github.com/redis/go-redis/v9 v9.5.3/go.mod h1:hdY0cQFCN4fnSYT6TkisLufl/4W5UIXyv0b/CLO2V2M=
+github.com/redis/go-redis/v9 v9.22.0 h1:laDvpYXTJtZLloinw1fA5Kqd6HAEH2XKxOkG/PDq2F0=
+github.com/redis/go-redis/v9 v9.22.0/go.mod h1:y2g0Wj8rQvuK0ELM+oxSudcLtC09JScs98I/X9gRWY4=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec h1:W09IVJc94icq4NjY3clb7Lk8O1qJ8BdBEF8z0ibU0rE=
 github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec/go.mod h1:qqbHyh8v60DhA7CoWK5oRCqLrMHRGoxYCSS9EjAz6Eo=
 github.com/rogpeppe/go-internal v1.15.0 h1:D0RCU5rMAp+SpgkiNdrjfJ+LX4J1M32V2NeCY7EJ6hc=
@@ -11698,28 +13240,32 @@ github.com/vmihailenco/msgpack/v4 v4.3.12/go.mod h1:gborTTJjAo/GWTqqRjrLCn9pgNN+
 github.com/vmihailenco/tagparser v0.1.1/go.mod h1:OeAg3pn3UbLjkWt+rN9oFYB6u/cQgqMEUPoW2WPyhdI=
 github.com/zclconf/go-cty v1.8.0 h1:s4AvqaeQzJIu3ndv4gVIhplVD0krU+bgrcLSVUnaWuA=
 github.com/zclconf/go-cty v1.8.0/go.mod h1:vVKLxnk3puL4qRAv72AO+W99LUD4da90g3uUAzyuvAk=
+github.com/zeebo/xxh3 v1.1.0 h1:s7DLGDK45Dyfg7++yxI0khrfwq9661w9EN78eP/UZVs=
+github.com/zeebo/xxh3 v1.1.0/go.mod h1:IisAie1LELR4xhVinxWS5+zf1lA4p0MW4T+w+W07F5s=
+go.uber.org/atomic v1.11.0 h1:ZvwS0R+56ePWxUNi+Atn9dWONBPp/AUETXlHW0DxSjE=
+go.uber.org/atomic v1.11.0/go.mod h1:LUxbIzbOniOlMKjJjyPfpl4v+PKK2cNJn91OQbhoJI0=
 golang.org/x/crypto v0.0.0-20190308221718-c2843e01d9a2/go.mod h1:djNgcEr1/C05ACkg1iLfiJU5Ep61QUkGW8qpdssI0+w=
-golang.org/x/crypto v0.52.0 h1:RMs7fP2rXdep0CftQlK8Uf+kibLm7qkCcradZWYz988=
-golang.org/x/crypto v0.52.0/go.mod h1:1QgfPxDqh0T2M/elOJtp9RvuR95kVjir0e6/BvEmGbc=
-golang.org/x/mod v0.37.0 h1:vF1DjpVEshcIqoEaauuHebaLk1O1forxjxBaVn884JQ=
-golang.org/x/mod v0.37.0/go.mod h1:m8S8VeM9r4dzDwjrKO0a1sZP3YjeMamRRlD+fmR2Q/0=
+golang.org/x/crypto v0.55.0 h1:+KWHjbgOaAQ66dh/YlkZKHlz9ZUlq61AFirAR9ntP8M=
+golang.org/x/crypto v0.55.0/go.mod h1:uq0V9dE/fzQuJtbnL+2EhWOE63vo164FY8xqEnV9xis=
+golang.org/x/mod v0.38.0 h1:MECBjubtXD7yj4HrhIUcywNaGeNVUdfVnxmPajOk4yk=
+golang.org/x/mod v0.38.0/go.mod h1:V6Xz0pq8TQ3dGqVQ1FVHuelZpAL0uNhSkk9ogYP3c40=
 golang.org/x/net v0.0.0-20190603091049-60506f45cf65/go.mod h1:HSz+uSET+XFnRR8LxR5pz3Of3rY3CfYBVs4xY44aLks=
 golang.org/x/net v0.0.0-20200301022130-244492dfa37a/go.mod h1:z5CRVTTTmAJ677TzLLGU+0bjPO0LkuOLi4/5GtJWs/s=
-golang.org/x/net v0.54.0 h1:2zJIZAxAHV/OHCDTCOHAYehQzLfSXuf/5SoL/Dv6w/w=
-golang.org/x/net v0.54.0/go.mod h1:Sj4oj8jK6XmHpBZU/zWHw3BV3abl4Kvi+Ut7cQcY+cQ=
-golang.org/x/sync v0.21.0 h1:HLII4xRRTtCRkxYp4HNFF0Js/Og6q2i++KXbg0gHCwM=
-golang.org/x/sync v0.21.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
+golang.org/x/net v0.58.0 h1:ynWG7rqYi4ccpTEuPZ2QGWHktVEM9DMCj9yzDE0Q7To=
+golang.org/x/net v0.58.0/go.mod h1:YwCddHnFlT7eLQqVprV19OnhLGtc5xOKgE0RyqgfWAU=
+golang.org/x/sync v0.22.0 h1:SZjpbeLmrCk4xhRSZFNZW5gFUeCeFgjekvI/+gfScek=
+golang.org/x/sync v0.22.0/go.mod h1:9xrNwdLfx4jkKbNva9FpL6vEN7evnE43NNNJQ2LF3+0=
 golang.org/x/sys v0.0.0-20190215142949-d0b11bdaac8a/go.mod h1:STP8DvDyc/dI5b8T5hshtkjS+E42TnysNCUPdjciGhY=
 golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
 golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=
 golang.org/x/text v0.3.0/go.mod h1:NqM8EUOU14njkJ3fqMW+pc6Ldnwhi/IjpwHt7yyuwOQ=
 golang.org/x/text v0.3.2/go.mod h1:bEr9sfX3Q8Zfm5fL9x+3itogRgK3+ptLWKqgva+5dAk=
 golang.org/x/text v0.3.5/go.mod h1:5Zoc/QRtKVWzQhOtBMvqHzDpF6irO9z98xDceosuGiQ=
-golang.org/x/text v0.37.0 h1:Cqjiwd9eSg8e0QAkyCaQTNHFIIzWtidPahFWR83rTrc=
-golang.org/x/text v0.37.0/go.mod h1:a5sjxXGs9hsn/AJVwuElvCAo9v8QYLzvavO5z2PiM38=
+golang.org/x/text v0.41.0 h1:vz/seA0lnX87Othu2f/0L24RcgrXD9/YFTSuGjj3rH8=
+golang.org/x/text v0.41.0/go.mod h1:jvf1O8ajNzZqhSrQBPbutR/EB83Cc0CFrezNQIwbb5M=
 golang.org/x/tools v0.0.0-20180917221912-90fa682c2a6e/go.mod h1:n7NCudcB/nEzxVGmLbDWY5pfWTLqBcC2KZ6jyYvM4mQ=
-golang.org/x/tools v0.47.0 h1:7Kn5x/d1svx/PzryTsqeoZN4TZwqeH5pGWjefhLi/1Q=
-golang.org/x/tools v0.47.0/go.mod h1:dFHnyTvFWY212G+h7ZY4Vsp/K3U4/7W9TyVaAul8uCA=
+golang.org/x/tools v0.48.0 h1:3+hClM1aLL5mjMKm5ovokw9epgRXPuu2tILgismM6RE=
+golang.org/x/tools v0.48.0/go.mod h1:08xX0orndb/F7jJxGDicx061tyd5pcMto75YMAXr6lk=
 google.golang.org/appengine v1.6.5/go.mod h1:8WjMMxjGQR8xUklV/ARdw2HLXBOI7O7uCIDZVag1xfc=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
 gopkg.in/check.v1 v1.0.0-20180628173108-788fd7840127/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=

@@ -11,7 +11,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - PORT=8080
       - DATABASE_DIALECT=postgres
       - DATABASE_URL=postgresql://grantsupport:secretpassword@postgres:5432/grantsupport?sslmode=disable
@@ -41,7 +41,7 @@ services:
     ports:
       - "8081:8080"
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - PORT=8080
       - DATABASE_DIALECT=mysql
       - DATABASE_URL=grantsupport:secretpassword@tcp(mysql:3306)/grantsupport?parseTime=true
@@ -67,7 +67,7 @@ services:
     ports:
       - "8082:8080"
     environment:
-      - ENVIRONMENT=production
+      - ENVIRONMENT=development
       - PORT=8080
       - DATABASE_DIALECT=sqlite
       - DATABASE_URL=file:/data/grantsupport.db?cache=shared&_pragma=foreign_keys(1)&_fk=1&_pragma=busy_timeout(5000)

@@ -151,6 +151,18 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 		return uuid.Nil, "", ErrSupportGrantInvalid
 	}
 
+	// Defense-in-depth: token_hash uniqueness makes a mismatch impossible under the current token format,
+	// but this check ensures any future change to token generation cannot silently reintroduce a cross-institution trust gap.
+	if grant.InstitutionID != instID {
+		if s.auditRepo != nil {
+			_, _ = s.auditRepo.LogSecurityEvent(ctx, grant.InstitutionID, agentUserID,
+				"SUPPORT_LOGIN_INSTITUTION_MISMATCH",
+				fmt.Sprintf("Token-derived institution ID %s did not match grant record institution ID %s — possible token tampering", instID, grant.InstitutionID),
+				nil)
+		}
+		return uuid.Nil, "", ErrSupportGrantInvalid
+	}
+
 	if err := s.supportGrantRepo.MarkGrantAsUsed(ctx, grant.ID); err != nil {
 		if errors.Is(err, repository.ErrGrantAlreadyUsed) {
 			return uuid.Nil, "", ErrSupportGrantInvalid
@@ -159,12 +171,12 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 	}
 
 	if s.auditRepo != nil {
-		_, _ = s.auditRepo.LogSecurityEvent(ctx, instID, agentUserID, "SUPPORT_ACCESS_LOGGED_IN", fmt.Sprintf("Support login executed by agent %s via active grant with scope %s", agentUserID.String(), grant.Scope), nil)
+		_, _ = s.auditRepo.LogSecurityEvent(ctx, grant.InstitutionID, agentUserID, "SUPPORT_ACCESS_LOGGED_IN", fmt.Sprintf("Support login executed by agent %s via active grant with scope %s", agentUserID.String(), grant.Scope), nil)
 	}
 
 	jwtToken, err := security.GenerateJWTWithScope(
 		agentUserID.String(),
-		instID.String(),
+		grant.InstitutionID.String(),
 		"SUPPORT_AGENT",
 		grant.Scope,
 		4*time.Hour,
@@ -176,7 +188,7 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 	if s.webhookDispatcher != nil {
 		s.webhookDispatcher.DispatchAsync(webhook.NewWebhookEvent(
 			"grant.claimed",
-			instID.String(),
+			grant.InstitutionID.String(),
 			agentUserID.String(),
 			map[string]any{
 				"grant_id": grant.ID.String(),
@@ -186,7 +198,7 @@ func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string,
 		))
 	}
 
-	return instID, jwtToken, nil
+	return grant.InstitutionID, jwtToken, nil
 }
 
 // RevokeSupportGrant invalidates all active support grants for an institution.

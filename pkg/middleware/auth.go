@@ -40,13 +40,20 @@ func NewAuthMiddleware(revocationStore ports.RevocationStore) func(http.Handler)
 				return
 			}
 
-			// TokenVersion revocation check
-			if revocationStore != nil {
-				revoked, err := revocationStore.IsTokenRevoked(r.Context(), claims.InstitutionID, claims.UserID, claims.TokenVersion)
-				if err == nil && revoked {
-					controller.WriteRFC7807Error(w, http.StatusUnauthorized, "TOKEN_REVOKED", "Session has been revoked. Please log in again.")
-					return
-				}
+			// TokenVersion revocation check (Fail-closed: missing revocation store or store error rejects request)
+			if revocationStore == nil {
+				controller.WriteRFC7807Error(w, http.StatusServiceUnavailable, "REVOCATION_CHECK_UNAVAILABLE", "Revocation store is not configured; unable to verify session revocation status.")
+				return
+			}
+
+			revoked, err := revocationStore.IsTokenRevoked(r.Context(), claims.InstitutionID, claims.UserID, claims.TokenVersion)
+			if err != nil {
+				controller.WriteRFC7807Error(w, http.StatusServiceUnavailable, "REVOCATION_CHECK_UNAVAILABLE", "Unable to verify session revocation status; please retry.")
+				return
+			}
+			if revoked {
+				controller.WriteRFC7807Error(w, http.StatusUnauthorized, "TOKEN_REVOKED", "Session has been revoked. Please log in again.")
+				return
 			}
 
 			tenant := &pkgctx.TenantData{

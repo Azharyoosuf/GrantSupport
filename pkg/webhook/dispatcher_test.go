@@ -229,3 +229,70 @@ func TestGrantOperationIsolationFromWebhookFailure(t *testing.T) {
 		t.Fatalf("Audit chain was corrupted after webhook failure: valid=%v, err=%v", valid, err)
 	}
 }
+
+func TestWebhookDispatcher_BoundedConcurrencyAndDrain(t *testing.T) {
+	var handledCount int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(20 * time.Millisecond) // Simulate network latency
+		atomic.AddInt64(&handledCount, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	dispatcher := webhook.NewWebhookDispatcher(server.URL, "secret")
+
+	const totalEvents = 50
+	for i := 0; i < totalEvents; i++ {
+		event := webhook.NewWebhookEvent("grant.created", "inst-1", "admin-1", map[string]any{"index": i})
+		dispatcher.DispatchAsync(event)
+	}
+
+	// Drain dispatcher with 5-second timeout context
+	drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	if err := dispatcher.Close(drainCtx); err != nil {
+		t.Fatalf("dispatcher.Close failed: %v", err)
+	}
+
+	if atomic.LoadInt64(&handledCount) != int64(totalEvents) {
+		t.Fatalf("Expected all %d async events to be drained, got %d", totalEvents, atomic.LoadInt64(&handledCount))
+	}
+
+	// Post-close dispatch must be rejected cleanly without panic
+	postCloseEvent := webhook.NewWebhookEvent("grant.revoked", "inst-1", "admin-1", nil)
+	dispatcher.DispatchAsync(postCloseEvent)
+	if atomic.LoadInt64(&handledCount) != int64(totalEvents) {
+		t.Fatalf("Event dispatched after Close should not execute, count=%d", atomic.LoadInt64(&handledCount))
+	}
+}
+
+func TestWebhookDispatch_MissingSecretDoesNotSendUnsignedWebhook(t *testing.T) {
+	var receivedRequests int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt64(&receivedRequests, 1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// Dispatcher configured with endpoint but EMPTY secret key
+	dispatcher := webhook.NewWebhookDispatcher(server.URL, "")
+
+	event := webhook.NewWebhookEvent("grant.created", "inst-1", "admin-1", map[string]any{"test": true})
+
+	// Synchronous dispatch must be a no-op (no unsigned request sent)
+	err := dispatcher.Dispatch(context.Background(), event)
+	if err != nil {
+		t.Fatalf("Expected nil error on no-op dispatch with missing secret, got: %v", err)
+	}
+
+	// Asynchronous dispatch must also be a no-op
+	dispatcher.DispatchAsync(event)
+	time.Sleep(100 * time.Millisecond)
+
+	if atomic.LoadInt64(&receivedRequests) != 0 {
+		t.Fatalf("Expected 0 requests sent when secret is missing, got %d (unsigned webhooks are prohibited)", atomic.LoadInt64(&receivedRequests))
+	}
+}

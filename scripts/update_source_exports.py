@@ -54,7 +54,26 @@ def generate_full_source():
     migration_files = []
     docs_files = []
     script_files = []
-    root_files = ["README.md", "Dockerfile", "docker-compose.yml", "go.mod", "go.sum"]
+    ci_files = []
+    root_files = [
+        "README.md",
+        "LICENSE",
+        "CONTRIBUTING.md",
+        "SECURITY.md",
+        "CHANGELOG.md",
+        ".gitignore",
+        ".dockerignore",
+        "Dockerfile",
+        "docker-compose.yml",
+        "go.mod",
+        "go.sum",
+    ]
+
+    if os.path.exists(os.path.join(REPO_ROOT, ".github", "workflows")):
+        for root, dirs, files in os.walk(os.path.join(REPO_ROOT, ".github", "workflows")):
+            for f in sorted(files):
+                rel = os.path.relpath(os.path.join(root, f), REPO_ROOT).replace(os.sep, "/")
+                ci_files.append(rel)
 
     for root, dirs, files in os.walk(os.path.join(REPO_ROOT, "cmd")):
         for f in sorted(files):
@@ -157,6 +176,12 @@ def generate_full_source():
             lines.append(f"- [{f}](#{make_anchor(f)})")
         lines.append("")
 
+    if ci_files:
+        lines.append("### .github/workflows/")
+        for f in ci_files:
+            lines.append(f"- [{f}](#{make_anchor(f)})")
+        lines.append("")
+
     if root_files:
         lines.append("### Root-level files")
         for f in root_files:
@@ -175,6 +200,7 @@ def generate_full_source():
         ("migrations", migration_files),
         ("docs", docs_files),
         ("scripts", script_files),
+        ("ci", ci_files),
         ("root", [f for f in root_files if os.path.exists(os.path.join(REPO_ROOT, f))])
     ]
 

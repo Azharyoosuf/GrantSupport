@@ -3,12 +3,12 @@ info:
   title: GrantSupport Engine API
   version: 1.0.0
   description: >
-    GrantSupport is an open-source, delegated support-access authentication and authorization engine.
+    GrantSupport is a delegated support-access authentication and cryptographic audit engine.
     It enables multi-tenant SaaS applications to issue cryptographically signed, time-bounded,
-    single-use support access tokens to vendor support agents with immutable audit logging.
+    single-use support access tokens to vendor support agents with tamper-evident audit logging.
   license:
-    name: Apache-2.0
-    url: https://www.apache.org/licenses/LICENSE-2.0.html
+    name: BSL-1.1
+    url: https://raw.githubusercontent.com/Azharyoosuf/GrantSupport/main/LICENSE
 
 servers:
   - url: http://localhost:8080
@@ -89,7 +89,8 @@ paths:
     post:
       summary: Revoke Active Support Grants
       description: >
-        Called by a customer administrator to immediately invalidate all pending or active support grants for their tenant.
+        Called by a customer administrator to immediately invalidate all pending or active unredeemed support grants for their tenant.
+        Prevents unredeemed grants from being claimed; already-issued active support sessions have their own JWT lifetime.
       security:
         - BearerAuth: []
       responses:
@@ -115,7 +116,7 @@ components:
       type: apiKey
       in: header
       name: X-Signature
-      description: 5-layer Ed25519 dual-key asymmetric request signature.
+      description: Opt-in 5-layer Ed25519 dual-key asymmetric request signature for custom machine-to-machine routes.
 
   schemas:
     HealthResponse:
@@ -209,6 +210,18 @@ components:
           type: string
           description: 4-hour RS256 signed access token for support operations.
           example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+        access_token:
+          type: string
+          description: Snake_case alias for accessToken.
+          example: "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+        data:
+          type: object
+          properties:
+            institution_id:
+              type: string
+              format: uuid
+            access_token:
+              type: string
       required:
         - success
         - message

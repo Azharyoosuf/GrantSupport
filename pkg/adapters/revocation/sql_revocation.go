@@ -26,7 +26,7 @@ func NewSQLRevocationStore(db *sql.DB, dialect string) *SQLRevocationStore {
 // IsTokenRevoked returns true if the user's current minimum valid token version is greater than tokenVersion.
 func (s *SQLRevocationStore) IsTokenRevoked(ctx context.Context, institutionID, userID string, tokenVersion int) (bool, error) {
 	if s.db == nil {
-		return false, nil // fail-open if not configured or fallback
+		return false, fmt.Errorf("revocation store not configured: no database connection")
 	}
 
 	var currentVersion int

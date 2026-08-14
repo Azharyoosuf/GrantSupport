@@ -20,14 +20,17 @@ func NewRedisRateLimiter(client *redis.Client) *RedisRateLimiter {
 
 // Allow checks if the counter for key is within the limit for the given duration window.
 func (r *RedisRateLimiter) Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error) {
-	if r.client == nil || limit <= 0 {
-		return true, nil // Fail open on rate limiting infrastructure error
+	if limit <= 0 {
+		return true, nil
+	}
+	if r.client == nil {
+		return false, fmt.Errorf("rate limiter unavailable: redis client not configured")
 	}
 
 	rateKey := fmt.Sprintf("ratelimit:%s", key)
 	count, err := r.client.Incr(ctx, rateKey).Result()
 	if err != nil {
-		return true, nil // Fail open
+		return false, fmt.Errorf("failed to evaluate redis rate limit: %w", err)
 	}
 
 	if count == 1 {

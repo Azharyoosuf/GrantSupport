@@ -65,10 +65,25 @@ func CatchAsync(fn func(w http.ResponseWriter, r *http.Request) error) http.Hand
 	}
 }
 
+// DefaultMaxBodyBytes sets the maximum allowed HTTP request body size (1 MB).
+const DefaultMaxBodyBytes = 1 << 20
+
 // DecodeAndValidate parses JSON payload into a target struct DTO and executes go-playground/validator v10 validation rules.
+// It wraps r.Body with http.MaxBytesReader to prevent denial-of-service from oversized request payloads.
 func DecodeAndValidate[T any](r *http.Request) (T, error) {
 	var dto T
-	if err := json.NewDecoder(r.Body).Decode(&dto); err != nil {
+	if r.Body == nil {
+		return dto, NewAppError(http.StatusBadRequest, "EMPTY_BODY", "Request body must not be empty")
+	}
+
+	limitedBody := http.MaxBytesReader(nil, r.Body, DefaultMaxBodyBytes)
+	decoder := json.NewDecoder(limitedBody)
+
+	if err := decoder.Decode(&dto); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			return dto, NewAppError(http.StatusRequestEntityTooLarge, "PAYLOAD_TOO_LARGE", "Request payload exceeds maximum allowed size of 1MB")
+		}
 		return dto, NewAppError(http.StatusBadRequest, "INVALID_JSON", "Invalid JSON request body format")
 	}
 

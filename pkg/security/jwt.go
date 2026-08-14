@@ -52,18 +52,27 @@ func LoadJWTKeysFromEnv() error {
 	return InitJWTKeys(privPEM, pubPEM)
 }
 
-// SetupTestRSAKeys generates and initializes an ephemeral RSA 2048-bit keypair for test suites.
-func SetupTestRSAKeys() error {
+// GenerateRSAKeypairPEM generates a new RSA 2048-bit keypair and returns both in PEM encoding.
+func GenerateRSAKeypairPEM() ([]byte, []byte, error) {
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	privPEM := pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privKey)})
 	pubBytes, err := x509.MarshalPKIXPublicKey(&privKey.PublicKey)
 	if err != nil {
-		return err
+		return nil, nil, err
 	}
 	pubPEM := pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: pubBytes})
+	return privPEM, pubPEM, nil
+}
+
+// SetupTestRSAKeys generates and initializes an ephemeral RSA 2048-bit keypair for test suites.
+func SetupTestRSAKeys() error {
+	privPEM, pubPEM, err := GenerateRSAKeypairPEM()
+	if err != nil {
+		return err
+	}
 	return InitJWTKeys(privPEM, pubPEM)
 }
 
@@ -164,4 +173,3 @@ func VerifyJWT(tokenString string) (*CustomClaims, error) {
 
 	return claims, nil
 }
-

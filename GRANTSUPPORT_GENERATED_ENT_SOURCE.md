@@ -1,6 +1,6 @@
 # GrantSupport Generated Ent Code Export
 
-- **Export Date**: 2026-08-13
+- **Export Date**: 2026-08-14
 - **Description**: Contains the generated Ent ORM boilerplate code omitted from GRANTSUPPORT_FULL_SOURCE.md.
 
 ---
@@ -15,6 +15,7 @@
 - [ent/auditevent_query.go](#ent-auditevent-query-go)
 - [ent/auditevent_update.go](#ent-auditevent-update-go)
 - [ent/client.go](#ent-client-go)
+- [ent/driver.go](#ent-driver-go)
 - [ent/ent.go](#ent-ent-go)
 - [ent/enttest/enttest.go](#ent-enttest-enttest-go)
 - [ent/hook/hook.go](#ent-hook-hook-go)
@@ -2770,6 +2771,21 @@ type (
 		AuditEvent, SupportGrant []ent.Interceptor
 	}
 )
+```
+
+---
+
+## ent/driver.go
+
+```go
+package ent
+
+import "entgo.io/ent/dialect"
+
+// Driver returns the underlying dialect.Driver configured on the ent.Client.
+func (c *Client) Driver() dialect.Driver {
+	return c.driver
+}
 ```
 
 ---

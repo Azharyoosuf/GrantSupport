@@ -3,25 +3,31 @@ package config
 
 import (
 	"os"
+	"strconv"
 )
 
 // Config holds environment configurations for database, caching, queues, KMS encryption, and server ports.
 type Config struct {
-	DatabaseURL            string
-	DatabaseDialect        string
-	ValkeyCacheURL         string
-	ValkeyQueueURL         string
-	Port                   string
-	Environment            string
-	AWSRegion              string
-	EncryptionProvider     string
-	KmsKeyID               string
-	LocalSecretKey         string
-	MasterEncryptionKey    string
-	TrustedProxies         []string
-	EnforceStrictIPBinding bool
-	WebhookURL             string
-	WebhookSecret          string
+	DatabaseURL              string
+	DatabaseDialect          string
+	ValkeyCacheURL           string
+	ValkeyQueueURL           string
+	Port                     string
+	Environment              string
+	AWSRegion                string
+	EncryptionProvider       string
+	KmsKeyID                 string
+	LocalSecretKey           string
+	MasterEncryptionKey      string
+	TrustedProxies           []string
+	EnforceStrictIPBinding   bool
+	WebhookURL               string
+	WebhookSecret            string
+	AutoMigrate              bool
+	DBMaxOpenConns           int
+	DBMaxIdleConns           int
+	DBConnMaxLifetimeMinutes int
+	DBConnMaxIdleTimeMinutes int
 }
 
 // AppConfig is a global singleton instance of application configuration.
@@ -100,22 +106,61 @@ func LoadConfig() (*Config, error) {
 	webhookURL := os.Getenv("WEBHOOK_URL")
 	webhookSecret := os.Getenv("WEBHOOK_SECRET")
 
+	autoMigrateStr := os.Getenv("AUTO_MIGRATE")
+	autoMigrate := false
+	if autoMigrateStr == "true" || (autoMigrateStr == "" && env != "production") {
+		autoMigrate = true
+	}
+
+	maxOpenConns := 50
+	if v := os.Getenv("DB_MAX_OPEN_CONNS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxOpenConns = parsed
+		}
+	}
+
+	maxIdleConns := 10
+	if v := os.Getenv("DB_MAX_IDLE_CONNS"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			maxIdleConns = parsed
+		}
+	}
+
+	connMaxLifetime := 15
+	if v := os.Getenv("DB_CONN_MAX_LIFETIME_MINUTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			connMaxLifetime = parsed
+		}
+	}
+
+	connMaxIdleTime := 5
+	if v := os.Getenv("DB_CONN_MAX_IDLE_TIME_MINUTES"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			connMaxIdleTime = parsed
+		}
+	}
+
 	cfg := &Config{
-		DatabaseURL:            dbURL,
-		DatabaseDialect:        dbDialect,
-		ValkeyCacheURL:         valkeyCacheURL,
-		ValkeyQueueURL:         valkeyQueueURL,
-		Port:                   port,
-		Environment:            env,
-		AWSRegion:              awsRegion,
-		EncryptionProvider:     provider,
-		KmsKeyID:               kmsKeyID,
-		LocalSecretKey:         localSecretKey,
-		MasterEncryptionKey:    masterKey,
-		TrustedProxies:         []string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
-		EnforceStrictIPBinding: strictIP,
-		WebhookURL:             webhookURL,
-		WebhookSecret:          webhookSecret,
+		DatabaseURL:              dbURL,
+		DatabaseDialect:          dbDialect,
+		ValkeyCacheURL:           valkeyCacheURL,
+		ValkeyQueueURL:           valkeyQueueURL,
+		Port:                     port,
+		Environment:              env,
+		AWSRegion:                awsRegion,
+		EncryptionProvider:       provider,
+		KmsKeyID:                 kmsKeyID,
+		LocalSecretKey:           localSecretKey,
+		MasterEncryptionKey:      masterKey,
+		TrustedProxies:           []string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+		EnforceStrictIPBinding:   strictIP,
+		WebhookURL:               webhookURL,
+		WebhookSecret:            webhookSecret,
+		AutoMigrate:              autoMigrate,
+		DBMaxOpenConns:           maxOpenConns,
+		DBMaxIdleConns:           maxIdleConns,
+		DBConnMaxLifetimeMinutes: connMaxLifetime,
+		DBConnMaxIdleTimeMinutes: connMaxIdleTime,
 	}
 
 	AppConfig = cfg

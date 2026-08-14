@@ -38,3 +38,16 @@ func TestMemoryRateLimiter(t *testing.T) {
 		t.Fatalf("Expected request after window reset to be allowed, got allow=%v, err=%v", allow, err)
 	}
 }
+
+func TestRedisRateLimiter_NilClientFailsClosed(t *testing.T) {
+	limiter := ratelimit.NewRedisRateLimiter(nil)
+	ctx := context.Background()
+
+	allow, err := limiter.Allow(ctx, "ip:127.0.0.1:login", 5, 1*time.Minute)
+	if err == nil {
+		t.Fatal("Expected error from nil Redis client in RedisRateLimiter")
+	}
+	if allow {
+		t.Fatal("Expected allow=false on Redis error (fail-closed)")
+	}
+}

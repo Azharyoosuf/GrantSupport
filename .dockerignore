@@ -1,0 +1,16 @@
+.git
+.gitignore
+.dockerignore
+.agents
+.github
+*.md
+docs/
+scripts/
+bin/
+dist/
+*.db
+*.sqlite
+*.test
+coverage.out
+.env
+.env.*

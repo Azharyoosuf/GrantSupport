@@ -1,9 +1,8 @@
 # GrantSupport 🛡️
 
-**Open-Source Delegated Support-Access Authentication & Cryptographic Audit Engine**
+**Source-Available Delegated Support-Access Authentication & Cryptographic Audit Engine**
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/grantsupport/grantsupport)](https://goreportcard.com/report/github.com/grantsupport/grantsupport)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License: BSL 1.1](https://img.shields.io/badge/License-BSL_1.1-blue.svg)](LICENSE)
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1.0-green.svg)](api/openapi.yaml)
 
 GrantSupport solves the **"vendor support access problem"** for multi-tenant B2B SaaS platforms. Rather than creating permanent backdoors or sharing static credentials, GrantSupport allows customer administrators to delegate temporary, time-bounded, cryptographically signed, and tamper-audited access to vendor support engineers.
@@ -13,23 +12,31 @@ GrantSupport solves the **"vendor support access problem"** for multi-tenant B2B
 ## 🔒 Core Security & Architectural Guarantees
 
 1. **Two-Tier Authentication**:
-   - **Tier 1 (Grant Creation & Revocation)**: Protected by standard RS256 Bearer JWTs (`ADMIN` / `OPERATOR` roles).
-   - **Tier 2 (Grant Consumption)**: Support agents claim high-entropy single-use tokens, issuing a 4-hour `SUPPORT_AGENT` RS256 JWT with explicit tenant scoping.
+   - **Tier 1 (Grant Creation & Revocation)**: Protected by standard RS256 Bearer JWTs (`ADMIN` / `OPERATOR` roles). Revoking a grant prevents unredeemed tokens from being claimed.
+   - **Tier 2 (Grant Consumption)**: Support agents claim high-entropy single-use tokens, issuing a 4-hour `SUPPORT_AGENT` RS256 JWT with explicit tenant scoping. (An already-issued support session has its own JWT lifetime and is governed by JWT expiration and revocation store mechanisms).
 2. **Atomic Single-Use Consumption**:
    - Unconditional SQL conditional predicate (`UPDATE ... WHERE id = ? AND is_used = false`) prevents concurrent token double-claim race conditions across distributed instances.
 3. **Cryptographic SHA-256 Audit Ledger**:
-   - Every grant lifecycle event is recorded in an immutable, append-only ledger with SHA-256 hash-chaining.
+   - Every grant lifecycle event is recorded in a cryptographically chained, tamper-evident, append-only ledger with SHA-256 hash-chaining.
    - **Per-Institution Mutex Striping**: Prevents hash-chain interleaving under high concurrency while avoiding cross-tenant lock contention.
    - **Tamper Verification**: Built-in `VerifyAuditChain(ctx, institutionID)` detects any unauthorized database mutation.
 4. **Automated PII & Credential Sanitization**:
-   - Redacts bearer tokens, passwords, credit cards (PAN), emails, and phone numbers before logging to the immutable audit ledger.
+   - Redacts bearer tokens, passwords, credit cards (PAN), emails, and phone numbers before logging to the tamper-evident audit ledger.
 5. **Database Portability & Connection Pool Preservation**:
-   - Native support for **PostgreSQL**, **MySQL**, **MariaDB**, and **SQLite** (pure Go `modernc.org/sqlite`).
+   - **PostgreSQL**: Reference / primary production database.
+   - **MySQL (8.0+) & MariaDB (10.5+)**: Supported enterprise relational backends.
+   - **SQLite**: Supported for single-process, embedded applications, local development, and test suites (pure Go `modernc.org/sqlite`; not distributed across multi-container replicas).
    - Reuses caller-managed `*sql.DB` connection pools without creating secondary pools or leaking resources.
 6. **Valkey / Redis Optionality**:
-   - Distributed locking, replay prevention, and token revocation support both Valkey/Redis clusters and pure SQL/In-Memory fallback adapters.
+   - Distributed locking, replay prevention, and token revocation officially support **Valkey** and **Redis** (other Redis-protocol-compatible implementations may work but are not officially verified or supported).
+   - Operates fully without Redis/Valkey by automatically falling back to SQL database tables or in-process memory stores. Rate limiting without Redis operates on an in-memory token bucket per instance.
 7. **Signed Lifecycle Webhooks**:
    - Dispatches `grant.created`, `grant.claimed`, and `grant.revoked` webhook events with HMAC-SHA256 request signatures (`X-GrantSupport-Signature`).
+8. **Opt-In 5-Layer Machine-to-Machine Security (Go Embedders)**:
+   - Provides an optional 5-layer Ed25519 dual-key middleware (`engine.BulletproofMiddleware(keyStore)`) for Go embedders building custom machine-to-machine routes (timestamp freshness, nonce replay protection, Ed25519 signatures, and IP CIDR binding).
+   - *Note*: This is an **opt-in capability** for custom routes and is NOT applied to default HTTP endpoints (which use standard JWT bearer authentication and rate limiting). Callers must provide and manage their own key storage.
+9. **Data Encryption & Key Management Capabilities**:
+   - Provides optional AWS KMS envelope encryption and local HKDF AES-256-GCM encryption utilities for application-level data protection; encryption is not automatically applied to every database field.
 
 ---
 
@@ -156,6 +163,8 @@ Authorization: Bearer <Admin_JWT>
 }
 ```
 
+> **Note on Revocation Semantics**: Revoking a support grant immediately invalidates all unredeemed grants for the tenant, preventing future claims. An already-issued support session has its own JWT lifetime and is governed by standard JWT expiration and `RevocationStore` session revocation mechanisms.
+
 ---
 
 ## 🧪 Testing & Verification
@@ -168,6 +177,12 @@ go test -count=1 ./... -v
 
 ---
 
-## 📄 License
+## 📄 License & Commercial Terms
 
-GrantSupport is licensed under the [Apache License, Version 2.0](LICENSE).
+GrantSupport is licensed under the **[Business Source License 1.1 (BSL 1.1)](LICENSE)**.
+
+- **Free Tier**: Free of charge for personal use, educational use, non-commercial projects, evaluation, development, testing, and production use by individuals and small organizations.
+- **Commercial / Enterprise Tier**: Production use of GrantSupport by commercial corporations, enterprises, or multinational corporations (MNCs) requires a paid commercial license (**$199/month**) obtained directly from the Licensor.
+- **Open Source Transition**: On **August 14, 2030** (Change Date), the software automatically converts to the **Apache License, Version 2.0**.
+
+For commercial licensing inquiries: `licensing@grantsupport.io` (or repository maintainer).

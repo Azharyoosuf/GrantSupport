@@ -10,10 +10,14 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// DefaultMaxConcurrentWebhooks limits simultaneous outbound HTTP webhook delivery goroutines.
+const DefaultMaxConcurrentWebhooks = 25
 
 // WebhookEvent represents an event payload dispatched to registered subscriber webhooks.
 type WebhookEvent struct {
@@ -42,9 +46,13 @@ type WebhookDispatcher struct {
 	webhookURL string
 	secretKey  string
 	client     *http.Client
+	sem        chan struct{}
+	wg         sync.WaitGroup
+	mu         sync.RWMutex
+	closed     bool
 }
 
-// NewWebhookDispatcher creates a new WebhookDispatcher instance.
+// NewWebhookDispatcher creates a new WebhookDispatcher instance with bounded worker capacity.
 func NewWebhookDispatcher(webhookURL, secretKey string) *WebhookDispatcher {
 	return &WebhookDispatcher{
 		webhookURL: webhookURL,
@@ -52,6 +60,7 @@ func NewWebhookDispatcher(webhookURL, secretKey string) *WebhookDispatcher {
 		client: &http.Client{
 			Timeout: 5 * time.Second,
 		},
+		sem: make(chan struct{}, DefaultMaxConcurrentWebhooks),
 	}
 }
 
@@ -67,8 +76,8 @@ func (d *WebhookDispatcher) ComputeSignature(payload []byte) string {
 
 // Dispatch sends a webhook event synchronously with HMAC-SHA256 signature authentication.
 func (d *WebhookDispatcher) Dispatch(ctx context.Context, event *WebhookEvent) error {
-	if d.webhookURL == "" {
-		return nil // No-op if webhook is not configured
+	if d.webhookURL == "" || d.secretKey == "" {
+		return nil // No-op if webhook URL or signing secret is not configured
 	}
 
 	payload, err := json.Marshal(event)
@@ -86,7 +95,8 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, event *WebhookEvent) e
 	req.Header.Set("X-GrantSupport-Event", event.EventType)
 	req.Header.Set("X-GrantSupport-Delivery", event.ID)
 
-	if signature := d.ComputeSignature(payload); signature != "" {
+	signature := d.ComputeSignature(payload)
+	if signature != "" {
 		req.Header.Set("X-GrantSupport-Signature", signature)
 	}
 
@@ -103,18 +113,35 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, event *WebhookEvent) e
 	return nil
 }
 
-// DispatchAsync sends a webhook event asynchronously in a background goroutine.
+// DispatchAsync sends a webhook event asynchronously with bounded concurrency and shutdown tracking.
 func (d *WebhookDispatcher) DispatchAsync(event *WebhookEvent) {
-	if d.webhookURL == "" {
+	if d.webhookURL == "" || d.secretKey == "" {
 		return
 	}
 
+	d.mu.RLock()
+	if d.closed {
+		d.mu.RUnlock()
+		slog.Warn("Webhook dispatch skipped: dispatcher is closed",
+			slog.String("event_type", event.EventType),
+			slog.String("event_id", event.ID),
+		)
+		return
+	}
+	d.wg.Add(1)
+	d.mu.RUnlock()
+
 	go func() {
+		defer d.wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
 				slog.Error("Webhook async dispatch panic recovered", slog.Any("panic", r))
 			}
 		}()
+
+		// Acquire worker slot from bounded semaphore channel
+		d.sem <- struct{}{}
+		defer func() { <-d.sem }()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -127,4 +154,24 @@ func (d *WebhookDispatcher) DispatchAsync(event *WebhookEvent) {
 			)
 		}
 	}()
+}
+
+// Close gracefully waits for in-flight async webhook deliveries to complete or until the context expires.
+func (d *WebhookDispatcher) Close(ctx context.Context) error {
+	d.mu.Lock()
+	d.closed = true
+	d.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		d.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }

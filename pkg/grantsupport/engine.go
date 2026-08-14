@@ -2,10 +2,10 @@ package grantsupport
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -17,6 +17,7 @@ import (
 	"grantsupport/pkg/adapters/ratelimit"
 	"grantsupport/pkg/adapters/replay"
 	"grantsupport/pkg/adapters/revocation"
+	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
 	"grantsupport/pkg/middleware"
 	"grantsupport/pkg/ports"
@@ -75,7 +76,11 @@ func NewEngine(opts ...Option) (*Engine, error) {
 			return nil, fmt.Errorf("failed to auto-migrate database schema: %w", err)
 		}
 		if cfg.SQLDB != nil {
-			if err := createCapabilityTables(migrateCtx, cfg.SQLDB, cfg.Dialect); err != nil {
+			if err := repository.CreateCapabilityTables(migrateCtx, cfg.SQLDB, cfg.Dialect); err != nil {
+				return nil, fmt.Errorf("failed to create capability tables: %w", err)
+			}
+		} else if baseRepo.SQLDB != nil {
+			if err := repository.CreateCapabilityTables(migrateCtx, baseRepo.SQLDB, baseRepo.Dialect); err != nil {
 				return nil, fmt.Errorf("failed to create capability tables: %w", err)
 			}
 		}
@@ -88,7 +93,14 @@ func NewEngine(opts ...Option) (*Engine, error) {
 		}
 	} else {
 		if err := security.LoadJWTKeysFromEnv(); err != nil {
-			// Generate test keypair fallback
+			isProd := cfg.Environment == "production" || os.Getenv("GO_ENV") == "production"
+			if !isProd && config.AppConfig != nil && config.AppConfig.Environment == "production" {
+				isProd = true
+			}
+			if isProd {
+				return nil, fmt.Errorf("PRODUCTION_JWT_KEYS_REQUIRED: RSA JWT keys (JWT_PRIVATE_KEY, JWT_PUBLIC_KEY) are required in production: %w", err)
+			}
+			// Generate test keypair fallback (development/test only)
 			if err := security.SetupTestRSAKeys(); err != nil {
 				return nil, fmt.Errorf("failed to initialize transient RSA JWT keys: %w", err)
 			}
@@ -96,10 +108,17 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	}
 
 	// 4. Initialize Capability Stores (Default to SQL or In-Memory adapters if omitted)
+	targetSQLDB := cfg.SQLDB
+	targetDialect := cfg.Dialect
+	if targetSQLDB == nil && baseRepo.SQLDB != nil {
+		targetSQLDB = baseRepo.SQLDB
+		targetDialect = baseRepo.Dialect
+	}
+
 	lockStore := cfg.LockStore
 	if lockStore == nil {
-		if cfg.SQLDB != nil {
-			lockStore = lock.NewSQLLockStore(cfg.SQLDB, cfg.Dialect)
+		if targetSQLDB != nil {
+			lockStore = lock.NewSQLLockStore(targetSQLDB, targetDialect)
 		} else {
 			lockStore = lock.NewMemoryLockStore()
 		}
@@ -107,8 +126,8 @@ func NewEngine(opts ...Option) (*Engine, error) {
 
 	replayStore := cfg.ReplayStore
 	if replayStore == nil {
-		if cfg.SQLDB != nil {
-			replayStore = replay.NewSQLReplayStore(cfg.SQLDB, cfg.Dialect)
+		if targetSQLDB != nil {
+			replayStore = replay.NewSQLReplayStore(targetSQLDB, targetDialect)
 		} else {
 			replayStore = replay.NewMemoryReplayStore(1 * time.Minute)
 		}
@@ -116,9 +135,12 @@ func NewEngine(opts ...Option) (*Engine, error) {
 
 	revocationStore := cfg.RevocationStore
 	if revocationStore == nil {
-		if cfg.SQLDB != nil {
-			revocationStore = revocation.NewSQLRevocationStore(cfg.SQLDB, cfg.Dialect)
+		if targetSQLDB != nil {
+			revocationStore = revocation.NewSQLRevocationStore(targetSQLDB, targetDialect)
 		}
+	}
+	if revocationStore == nil {
+		return nil, errors.New("REVOCATION_STORE_REQUIRED: A valid RevocationStore or database connection must be configured to ensure session revocation security")
 	}
 
 	rateLimiter := cfg.RateLimiter
@@ -200,12 +222,15 @@ func (e *Engine) HTTPHandler() http.Handler {
 		_, _ = w.Write([]byte(`{"status":"UP","service":"GrantSupport Engine","version":"v1.0.0"}`))
 	})
 
-	// Public Support Login
-	r.Post("/api/v1/auth/support/login", controller.CatchAsync(e.grantController.SupportLogin))
+	// Public Support Login (Rate limited to 10 attempts per minute per IP)
+	r.With(
+		middleware.RateLimitMiddleware(e.rateLimiter, 10, 60),
+	).Post("/api/v1/auth/support/login", controller.CatchAsync(e.grantController.SupportLogin))
 
 	// Authenticated Admin Endpoints
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.NewAuthMiddleware(e.revocationStore))
+		r.Use(middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"))
 		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(e.grantController.GrantSupport))
 		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(e.grantController.RevokeSupport))
 	})
@@ -214,6 +239,10 @@ func (e *Engine) HTTPHandler() http.Handler {
 }
 
 // BulletproofMiddleware returns the 5-layer Ed25519 dual-key authentication middleware.
+// This is an opt-in capability for Go embedders building their own machine-to-machine API routes.
+// It is NOT applied to the default HTTPHandler() endpoints (login/grant/revoke), which use simpler
+// JWT bearer authentication instead. Callers must build and manage their own keyStore — no key
+// persistence or registration API is provided by this package.
 func (e *Engine) BulletproofMiddleware(keyStore map[string]*security.APIKeyDetails) func(http.Handler) http.Handler {
 	return middleware.BulletproofAuthMiddleware(e.replayStore, keyStore)
 }
@@ -223,8 +252,14 @@ func (e *Engine) AuthMiddleware() func(http.Handler) http.Handler {
 	return middleware.NewAuthMiddleware(e.revocationStore)
 }
 
-// Close gracefully releases engine resources. Does NOT close caller-provided *sql.DB.
+// Close gracefully releases engine resources and drains in-flight webhooks. Does NOT close caller-provided *sql.DB.
 func (e *Engine) Close() error {
+	if e.webhookDispatcher != nil {
+		drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = e.webhookDispatcher.Close(drainCtx)
+		cancel()
+	}
+
 	if memReplay, ok := e.replayStore.(*replay.MemoryReplayStore); ok {
 		memReplay.Close()
 	}
@@ -234,74 +269,4 @@ func (e *Engine) Close() error {
 	}
 
 	return nil
-}
-
-func createCapabilityTables(ctx context.Context, db *sql.DB, dialect string) error {
-	if db == nil {
-		return nil
-	}
-
-	var ddl string
-	switch dialect {
-	case "sqlite", "sqlite3":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key TEXT PRIMARY KEY,
-			owner_token TEXT NOT NULL,
-			expires_at DATETIME NOT NULL,
-			acquired_at DATETIME NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key TEXT PRIMARY KEY,
-			expires_at DATETIME NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id TEXT NOT NULL,
-			user_id TEXT NOT NULL,
-			token_version INTEGER NOT NULL DEFAULT 1,
-			revoked_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (institution_id, user_id)
-		);`
-	case "mysql", "mariadb":
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key VARCHAR(255) PRIMARY KEY,
-			owner_token VARCHAR(64) NOT NULL,
-			expires_at DATETIME(6) NOT NULL,
-			acquired_at DATETIME(6) NOT NULL
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key VARCHAR(255) PRIMARY KEY,
-			expires_at DATETIME(6) NOT NULL
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id VARCHAR(36) NOT NULL,
-			user_id VARCHAR(36) NOT NULL,
-			token_version INT NOT NULL DEFAULT 1,
-			revoked_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
-			PRIMARY KEY (institution_id, user_id)
-		) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;`
-	default: // postgres, pgx
-		ddl = `
-		CREATE TABLE IF NOT EXISTS gs_locks (
-			lock_key VARCHAR(255) PRIMARY KEY,
-			owner_token VARCHAR(64) NOT NULL,
-			expires_at TIMESTAMPTZ NOT NULL,
-			acquired_at TIMESTAMPTZ NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_replays (
-			nonce_key VARCHAR(255) PRIMARY KEY,
-			expires_at TIMESTAMPTZ NOT NULL
-		);
-		CREATE TABLE IF NOT EXISTS gs_revocations (
-			institution_id UUID NOT NULL,
-			user_id UUID NOT NULL,
-			token_version INTEGER NOT NULL DEFAULT 1,
-			revoked_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-			PRIMARY KEY (institution_id, user_id)
-		);`
-	}
-
-	_, err := db.ExecContext(ctx, ddl)
-	return err
 }

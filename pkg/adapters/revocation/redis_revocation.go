@@ -20,7 +20,7 @@ func NewRedisRevocationStore(client *redis.Client) *RedisRevocationStore {
 // IsTokenRevoked checks whether the cached token version in Redis is greater than tokenVersion.
 func (s *RedisRevocationStore) IsTokenRevoked(ctx context.Context, institutionID, userID string, tokenVersion int) (bool, error) {
 	if s.client == nil {
-		return false, nil
+		return false, fmt.Errorf("revocation store unavailable: redis client not configured")
 	}
 
 	cacheKey := fmt.Sprintf("cache:%s:user:security:%s", institutionID, userID)

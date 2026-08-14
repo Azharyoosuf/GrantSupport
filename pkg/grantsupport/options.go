@@ -23,6 +23,7 @@ type EngineConfig struct {
 	PublicKeyPEM    []byte
 	WebhookURL      string
 	WebhookSecret   string
+	Environment     string
 	AutoMigrate     bool
 	OwnsDB          bool
 }
@@ -105,5 +106,12 @@ func WithWebhook(webhookURL, webhookSecret string) Option {
 func WithAutoMigrate(enable bool) Option {
 	return func(c *EngineConfig) {
 		c.AutoMigrate = enable
+	}
+}
+
+// WithEnvironment configures runtime environment mode (e.g., "production", "development", "test").
+func WithEnvironment(env string) Option {
+	return func(c *EngineConfig) {
+		c.Environment = env
 	}
 }
