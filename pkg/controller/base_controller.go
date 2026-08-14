@@ -34,13 +34,20 @@ func NewAppError(status int, code, detail string) *AppError {
 }
 
 // CatchAsync is the Go higher-order function equivalent of Node.js catchAsync middleware.
-// It wraps controller handler methods, automatically enforcing RFC 7807 Problem Details formatting on errors.
+// It wraps controller handler methods, automatically enforcing RFC 9457 Problem Details formatting on errors and panics.
 func CatchAsync(fn func(w http.ResponseWriter, r *http.Request) error) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("[HTTP_HANDLER_PANIC]", slog.Any("panic", rec), slog.String("path", r.URL.Path))
+				WriteProblemDetailsError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "An unexpected internal server error occurred. Please contact support.")
+			}
+		}()
+
 		if err := fn(w, r); err != nil {
 			var appErr *AppError
 			if errors.As(err, &appErr) {
-				WriteRFC7807Error(w, appErr.Status, appErr.Code, appErr.Detail)
+				WriteProblemDetailsError(w, r, appErr.Status, appErr.Code, appErr.Detail)
 				return
 			}
 
@@ -54,13 +61,13 @@ func CatchAsync(fn func(w http.ResponseWriter, r *http.Request) error) http.Hand
 					}
 					sb.WriteString(fmt.Sprintf("field '%s' failed validation rule '%s'", fieldErr.Field(), fieldErr.Tag()))
 				}
-				WriteRFC7807Error(w, http.StatusBadRequest, "VALIDATION_ERROR", sb.String())
+				WriteProblemDetailsError(w, r, http.StatusBadRequest, "VALIDATION_ERROR", sb.String())
 				return
 			}
 
 			// Fallback runtime error (Sanitized to prevent internal database structure leakage)
 			slog.Error("[UNHANDLED_HTTP_ERROR]", slog.String("error", err.Error()), slog.String("path", r.URL.Path))
-			WriteRFC7807Error(w, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "An unexpected internal server error occurred. Please contact support.")
+			WriteProblemDetailsError(w, r, http.StatusInternalServerError, "INTERNAL_SERVER_ERROR", "An unexpected internal server error occurred. Please contact support.")
 		}
 	}
 }
@@ -101,17 +108,37 @@ func WriteJSON(w http.ResponseWriter, status int, data any) {
 	_ = json.NewEncoder(w).Encode(data)
 }
 
-// WriteRFC7807Error serializes an RFC 7807 Problem Details error response.
-func WriteRFC7807Error(w http.ResponseWriter, status int, code, detail string) {
+// WriteProblemDetailsError serializes an RFC 9457 Problem Details error response.
+func WriteProblemDetailsError(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
 	w.Header().Set("Content-Type", "application/problem+json")
 	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(map[string]any{
+	instance := ""
+	correlationID := ""
+	if r != nil {
+		instance = r.URL.Path
+		correlationID = r.Header.Get("X-Correlation-ID")
+	}
+	payload := map[string]any{
 		"type":     "https://grantsupport.io/errors/" + strings.ToLower(code),
 		"title":    code,
 		"status":   status,
 		"detail":   detail,
-		"instance": "",
-	})
+		"instance": instance,
+	}
+	if correlationID != "" {
+		payload["correlation_id"] = correlationID
+	}
+	_ = json.NewEncoder(w).Encode(payload)
+}
+
+// WriteRFC7807Error is an alias for WriteProblemDetailsError maintained for backward compatibility.
+func WriteRFC7807Error(w http.ResponseWriter, status int, code, detail string) {
+	WriteProblemDetailsError(w, nil, status, code, detail)
+}
+
+// WriteRFC9457Error is an explicit alias for WriteProblemDetailsError.
+func WriteRFC9457Error(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
+	WriteProblemDetailsError(w, r, status, code, detail)
 }
 
 // getRemoteIP extracts client remote IP safely prioritize Cloudflare headers without trusting raw X-Forwarded-For.

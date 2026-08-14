@@ -18,12 +18,12 @@ func RequireRoles(allowedRoles ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tenant, ok := pkgctx.GetTenant(r.Context())
 			if !ok || tenant == nil {
-				controller.WriteRFC7807Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
+				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
 				return
 			}
 
 			if !allowedMap[tenant.Role] {
-				controller.WriteRFC7807Error(w, http.StatusForbidden, "FORBIDDEN", "You do not have permission to perform this action")
+				controller.WriteProblemDetailsError(w, r, http.StatusForbidden, "FORBIDDEN", "You do not have permission to perform this action")
 				return
 			}
 

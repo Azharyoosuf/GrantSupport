@@ -125,6 +125,27 @@ services:
     profiles:
       - mysql
 
+  mariadb:
+    image: mariadb:11.4
+    container_name: gs-mariadb
+    restart: unless-stopped
+    environment:
+      - MARIADB_ROOT_PASSWORD=rootsecret
+      - MARIADB_DATABASE=grantsupport
+      - MARIADB_USER=grantsupport
+      - MARIADB_PASSWORD=secretpassword
+    ports:
+      - "3307:3306"
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "healthcheck.sh --connect --innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    profiles:
+      - mariadb
+
   valkey:
     image: valkey/valkey:7.2-alpine
     container_name: gs-valkey
@@ -143,4 +164,5 @@ services:
 volumes:
   postgres_data:
   mysql_data:
+  mariadb_data:
   sqlite_data:

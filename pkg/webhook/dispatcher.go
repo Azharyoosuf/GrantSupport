@@ -32,7 +32,7 @@ type WebhookEvent struct {
 // NewWebhookEvent constructs a new WebhookEvent with an assigned UUID and current timestamp.
 func NewWebhookEvent(eventType, institutionID, actorID string, data map[string]any) *WebhookEvent {
 	return &WebhookEvent{
-		ID:            uuid.New().String(),
+		ID:            uuid.Must(uuid.NewV7()).String(),
 		EventType:     eventType,
 		InstitutionID: institutionID,
 		ActorID:       actorID,

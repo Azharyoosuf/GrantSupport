@@ -25,7 +25,7 @@ func (SupportGrant) Annotations() []schema.Annotation {
 // Fields of the SupportGrant.
 func (SupportGrant) Fields() []ent.Field {
 	return []ent.Field{
-		field.UUID("id", uuid.UUID{}).Default(uuid.New),
+		field.UUID("id", uuid.UUID{}).Default(func() uuid.UUID { return uuid.Must(uuid.NewV7()) }),
 		field.UUID("institution_id", uuid.UUID{}),
 		field.UUID("granted_by_id", uuid.UUID{}),
 		field.UUID("used_by_id", uuid.UUID{}).Optional().Nillable(),

@@ -162,6 +162,7 @@ func main() {
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.CorrelationIDMiddleware)
+	r.Use(middleware.SecurityHeadersMiddleware)
 
 	// Public Health Endpoint
 	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
@@ -194,19 +195,80 @@ func main() {
 	if port == "" {
 		port = "8085"
 	}
-	server := &http.Server{
-		Addr:         fmt.Sprintf(":%s", port),
-		Handler:      r,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-	}
 
-	go func() {
-		slog.Info("GrantSupport Engine listening for traffic", slog.String("port", port))
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			slog.Error("HTTP server failed", slog.String("error", err.Error()))
+	var serversToShutdown []*http.Server
+
+	if cfg.TLSEnabled {
+		slog.Info("Initializing Native TLS termination...", slog.String("cert", cfg.TLSCertFile), slog.String("key", cfg.TLSKeyFile))
+		tlsConfig, err := security.NewServerTLSConfig(cfg.TLSCertFile, cfg.TLSKeyFile)
+		if err != nil {
+			slog.Error("FATAL: Failed to load TLS configuration. Exiting (Fail Startup).", slog.String("error", err.Error()))
+			os.Exit(1)
 		}
-	}()
+
+		httpsPort := cfg.HTTPSPort
+		if httpsPort == "" {
+			httpsPort = "8443"
+		}
+
+		httpsServer := &http.Server{
+			Addr:              fmt.Sprintf(":%s", httpsPort),
+			Handler:           r,
+			TLSConfig:         tlsConfig,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      15 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    1 << 20,
+		}
+		serversToShutdown = append(serversToShutdown, httpsServer)
+
+		go func() {
+			slog.Info("GrantSupport HTTPS Server listening for traffic", slog.String("port", httpsPort), slog.String("min_tls", "1.2"), slog.Bool("http2", true))
+			if err := httpsServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				slog.Error("HTTPS server failed", slog.String("error", err.Error()))
+			}
+		}()
+
+		// Optional HTTP to HTTPS redirect listener
+		if cfg.HTTPToHTTPSRedirect {
+			httpRedirectServer := &http.Server{
+				Addr:              fmt.Sprintf(":%s", port),
+				Handler:           middleware.HTTPToHTTPSRedirectHandler(httpsPort),
+				ReadHeaderTimeout: 5 * time.Second,
+				ReadTimeout:       10 * time.Second,
+				WriteTimeout:      10 * time.Second,
+				IdleTimeout:       30 * time.Second,
+			}
+			serversToShutdown = append(serversToShutdown, httpRedirectServer)
+
+			go func() {
+				slog.Info("GrantSupport HTTP->HTTPS Redirect Server listening", slog.String("port", port), slog.String("redirect_to_https_port", httpsPort))
+				if err := httpRedirectServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+					slog.Error("HTTP redirect server failed", slog.String("error", err.Error()))
+				}
+			}()
+		}
+	} else {
+		// Plaintext HTTP Server (For local dev or reverse proxy termination)
+		httpServer := &http.Server{
+			Addr:              fmt.Sprintf(":%s", port),
+			Handler:           r,
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			WriteTimeout:      15 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			MaxHeaderBytes:    1 << 20,
+		}
+		serversToShutdown = append(serversToShutdown, httpServer)
+
+		go func() {
+			slog.Info("GrantSupport HTTP Server listening for traffic (Reverse-Proxy / Dev Mode)", slog.String("port", port))
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Error("HTTP server failed", slog.String("error", err.Error()))
+			}
+		}()
+	}
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -215,6 +277,8 @@ func main() {
 	slog.Info("Shutting down GrantSupport Engine gracefully...")
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	_ = server.Shutdown(ctx)
+	for _, srv := range serversToShutdown {
+		_ = srv.Shutdown(ctx)
+	}
 	slog.Info("GrantSupport Engine stopped cleanly.")
 }

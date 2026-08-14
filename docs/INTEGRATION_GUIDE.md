@@ -33,15 +33,12 @@ Create an `.env` file or export environment variables for GrantSupport:
 PORT=8085
 NODE_ENV=production
 
-# Customer Database & Cache (Data Plane)
+# Database & Cache (Data Plane)
+DATABASE_DIALECT=postgres
 DATABASE_URL=postgres://postgres:password@localhost:5432/your_app_db?sslmode=disable
-VALKEY_URL=redis://localhost:6379/0
+VALKEY_CACHE_URL=valkey://localhost:6379/0
 
-# Licensing (Control Plane)
-LICENSE_KEY=eyJhY3R... (Your Ed25519 License Key)
-JWKS_URL=https://licensing.yourcompany.com/.well-known/jwks.json
-
-# JWT Signing Keys
+# JWT Signing Keys (RSA-2048)
 JWT_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
 JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n..."
 ```
@@ -50,7 +47,7 @@ JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n..."
 
 ## 4. Step 3 — Adding GrantSupport Endpoints to Your Router
 
-In your Go Chi / Gin / Fiber web router, mount the GrantSupport controller handlers:
+In your Go Chi web router, mount the GrantSupport controller handlers:
 
 ```go
 package main
@@ -66,14 +63,20 @@ func RegisterSupportRoutes(r chi.Router, deps *Dependencies) {
 	// Public Support Agent Login Endpoint (Agents redeem token for JWT)
 	r.Post("/api/v1/auth/support/login", controller.CatchAsync(deps.SupportController.SupportLogin))
 
+	// Authenticated Support Agent Logout Endpoint
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.RequireRoles("SUPPORT_AGENT"))
+		r.Post("/api/v1/auth/support/logout", controller.CatchAsync(deps.SupportController.SupportLogout))
+	})
+
 	// Customer-Admin Role-Gated Delegation Endpoints
 	r.Group(func(r chi.Router) {
-		r.Use(middleware.RequireRoles("ADMINISTRATOR", "OWNER"))
+		r.Use(middleware.RequireRoles("ADMINISTRATOR", "OWNER", "ADMIN"))
 		
 		// Customer Admin issues new support grant token
 		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(deps.SupportController.GrantSupport))
 		
-		// Customer Admin revokes all active support tokens
+		// Customer Admin revokes all active support tokens and active sessions
 		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(deps.SupportController.RevokeSupport))
 	})
 }

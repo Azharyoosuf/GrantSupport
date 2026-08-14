@@ -4,6 +4,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds environment configurations for database, caching, queues, KMS encryption, and server ports.
@@ -28,6 +29,15 @@ type Config struct {
 	DBMaxIdleConns           int
 	DBConnMaxLifetimeMinutes int
 	DBConnMaxIdleTimeMinutes int
+	TLSEnabled               bool
+	TLSCertFile              string
+	TLSKeyFile               string
+	HTTPSPort                string
+	HTTPToHTTPSRedirect      bool
+	HSTSEnabled              bool
+	HSTSMaxAge               int
+	HSTSIncludeSubdomains    bool
+	HSTSPreload              bool
 }
 
 // AppConfig is a global singleton instance of application configuration.
@@ -140,6 +150,37 @@ func LoadConfig() (*Config, error) {
 		}
 	}
 
+	tlsCertFile := os.Getenv("TLS_CERT_FILE")
+	tlsKeyFile := os.Getenv("TLS_KEY_FILE")
+	tlsEnabled := os.Getenv("TLS_ENABLED") == "true" || (tlsCertFile != "" && tlsKeyFile != "")
+	httpsPort := os.Getenv("HTTPS_PORT")
+	if httpsPort == "" {
+		httpsPort = "8443"
+	}
+	httpToHTTPSRedirect := os.Getenv("HTTP_TO_HTTPS_REDIRECT") == "true"
+	hstsEnabled := os.Getenv("HSTS_ENABLED") == "true" || (tlsEnabled && env == "production")
+	hstsMaxAge := 31536000
+	if v := os.Getenv("HSTS_MAX_AGE"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
+			hstsMaxAge = parsed
+		}
+	}
+	hstsIncludeSubdomains := os.Getenv("HSTS_INCLUDE_SUBDOMAINS") == "true"
+	hstsPreload := os.Getenv("HSTS_PRELOAD") == "true"
+
+	var trustedProxies []string
+	if rawProxies := os.Getenv("TRUSTED_PROXIES"); rawProxies != "" {
+		for _, p := range strings.Split(rawProxies, ",") {
+			if trimmed := strings.TrimSpace(p); trimmed != "" {
+				trustedProxies = append(trustedProxies, trimmed)
+			}
+		}
+	}
+	if len(trustedProxies) == 0 {
+		// Default to loopback only (127.0.0.1, ::1) to prevent blind trust of private RFC1918 addresses
+		trustedProxies = []string{"127.0.0.1", "::1"}
+	}
+
 	cfg := &Config{
 		DatabaseURL:              dbURL,
 		DatabaseDialect:          dbDialect,
@@ -152,7 +193,7 @@ func LoadConfig() (*Config, error) {
 		KmsKeyID:                 kmsKeyID,
 		LocalSecretKey:           localSecretKey,
 		MasterEncryptionKey:      masterKey,
-		TrustedProxies:           []string{"127.0.0.1", "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16"},
+		TrustedProxies:           trustedProxies,
 		EnforceStrictIPBinding:   strictIP,
 		WebhookURL:               webhookURL,
 		WebhookSecret:            webhookSecret,
@@ -161,6 +202,15 @@ func LoadConfig() (*Config, error) {
 		DBMaxIdleConns:           maxIdleConns,
 		DBConnMaxLifetimeMinutes: connMaxLifetime,
 		DBConnMaxIdleTimeMinutes: connMaxIdleTime,
+		TLSEnabled:               tlsEnabled,
+		TLSCertFile:              tlsCertFile,
+		TLSKeyFile:               tlsKeyFile,
+		HTTPSPort:                httpsPort,
+		HTTPToHTTPSRedirect:      httpToHTTPSRedirect,
+		HSTSEnabled:              hstsEnabled,
+		HSTSMaxAge:               hstsMaxAge,
+		HSTSIncludeSubdomains:    hstsIncludeSubdomains,
+		HSTSPreload:              hstsPreload,
 	}
 
 	AppConfig = cfg

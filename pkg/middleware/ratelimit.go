@@ -74,11 +74,11 @@ func RateLimitMiddleware(limiter ports.RateLimiterStore, limit int, windowSecond
 
 			allowed, err := limiter.Allow(r.Context(), key, limit, time.Duration(windowSeconds)*time.Second)
 			if err != nil {
-				controller.WriteRFC7807Error(w, http.StatusServiceUnavailable, "RATE_LIMIT_UNAVAILABLE", "Rate limiting service temporarily unavailable; please retry later.")
+				controller.WriteProblemDetailsError(w, r, http.StatusServiceUnavailable, "RATE_LIMIT_UNAVAILABLE", "Rate limiting service temporarily unavailable; please retry later.")
 				return
 			}
 			if !allowed {
-				controller.WriteRFC7807Error(w, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too many requests. Please retry later.")
+				controller.WriteProblemDetailsError(w, r, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too many requests. Please retry later.")
 				return
 			}
 

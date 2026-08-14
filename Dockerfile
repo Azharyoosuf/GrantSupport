@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for GrantSupport Standalone Engine
-FROM golang:1.24-alpine AS builder
+FROM golang:alpine AS builder
 
 WORKDIR /app
 

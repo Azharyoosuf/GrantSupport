@@ -73,12 +73,12 @@ GrantSupport implements **Delegated Support Access with Single-Use Ephemeral Tok
                                                                                                   │
                                                                                     9. Verify SHA-256(rawToken)
                                                                                     10. Check ExpiresAt > NOW()
-                                                                                    11. Atomic CAS UPDATE (is_used=true)
-                                                                                    12. Issue RS256 JWT (4h, SUPPORT_AGENT)
+                                                                                    11. Atomic CAS UPDATE (is_used=true, used_by_id=agentID)
+                                                                                    12. Issue RS256 JWT (ExpiresAt = Grant.ExpiresAt)
                                                                                     13. Log SUPPORT_ACCESS_LOGGED_IN
                                                                                     14. Dispatch webhook (grant.claimed)
                                                                                                   │
-[Support Agent] ◄──15. Returns RS256 JWT (scoped to InstitutionID & Role: SUPPORT_AGENT)──────────┘
+[Support Agent] ◄──15. Returns RS256 JWT (scoped to InstitutionID, Duration & Role: SUPPORT_AGENT)─┘
 ```
 
 ### Security Guarantees:
@@ -86,15 +86,15 @@ GrantSupport implements **Delegated Support Access with Single-Use Ephemeral Tok
 * **Hashed at Rest**: Only the SHA-256 hash of the token is stored in the database. Raw tokens are never persisted.
 * **Atomic Single-Use Consumption**: Token redemption uses an atomic conditional predicate:
   ```sql
-  UPDATE support_grants
-  SET is_used = true, used_at = CURRENT_TIMESTAMP
+  UPDATE gs_support_grants
+  SET is_used = true, used_by_id = ?, used_at = CURRENT_TIMESTAMP
   WHERE id = ? AND is_used = false;
   ```
   If concurrent requests attempt to claim the same grant token, exactly one succeeds and all other requests fail (`ErrGrantAlreadyUsed`).
-* **Time-Bound Expiration**: Grants carry strict TTLs (1 to 1440 minutes). Expired tokens are rejected at query and service layers.
-* **Grant Revocation vs. Session Revocation Semantics**:
-  - `POST /api/v1/auth/support/revoke` immediately invalidates all **unredeemed support grants** for the tenant by setting `expires_at = NOW()`.
-  - An **already-issued support session** holds an RS256 JWT with its own 4-hour lifetime and is governed by standard JWT expiration and the configured `RevocationStore`.
+* **Time-Bound Expiration & Dynamic Session Lifetime**: Grants carry strict TTLs (1 to 1440 minutes). The issued `SUPPORT_AGENT` JWT is dynamically bound to the exact grant expiration timestamp (`session expiration <= grant expiration`).
+* **Dual Grant and Active Session Revocation**:
+  - `POST /api/v1/auth/support/revoke` immediately invalidates all **unredeemed support grants** for the tenant AND revokes all currently active `SUPPORT_AGENT` JWT sessions by incrementing the tenant's agent token version in the `RevocationStore`.
+  - `POST /api/v1/auth/support/logout` allows a support agent to invalidate their active JWT session immediately upon completing maintenance.
 
 ---
 
@@ -167,3 +167,32 @@ GrantSupport provides pluggable capability adapters with explicit failure modes:
 | **Brute-Force Login** | Attacker attempts random token guessing on `/login`. | IP-based rate limiting (10 req/min/IP) with socket IP extraction and trusted proxy validation. |
 | **Audit Ledger Tampering** | Malicious DB operator modifies or deletes access logs. | SHA-256 cryptographic hash-chaining detected by `VerifyAuditChain()`. |
 | **Store Failure Bypass** | Redis or SQL store crashes during auth or rate limit check. | **Fail-closed** architecture: returns 503 / 401 rather than allowing unauthenticated or unthrottled access. |
+
+---
+
+## 8. HTTPS, TLS 1.2/1.3 & Transport Security
+
+GrantSupport supports two production deployment architectures for transport security:
+
+### 8.1 Deployment Models
+1. **Native TLS Termination**:
+   - GrantSupport directly binds to `HTTPS_PORT` (default `8443` or `443`) using standard Go `crypto/tls`.
+   - Certificate and private key paths are configured via `TLS_CERT_FILE` and `TLS_KEY_FILE`.
+   - If certificate/key files are missing, unreadable, expired, or mismatched, server **fails startup immediately** without insecure fallback.
+   - Optional HTTP-to-HTTPS redirect listener runs on `PORT` with HTTP 308 permanent redirect.
+2. **Reverse Proxy / Load Balancer Termination**:
+   - Upstream reverse proxy (ALB / Cloudflare) terminates TLS and forwards requests to GrantSupport over internal HTTP `PORT`.
+   - Client IP and protocol extraction uses a strict `TRUSTED_PROXIES` CIDR whitelist. Untrusted forwarded headers are ignored.
+
+### 8.2 TLS Policy & Cryptographic Defaults
+* **Minimum TLS Version**: `tls.VersionTLS12` (TLS 1.0 and TLS 1.1 are rejected).
+* **TLS 1.3**: Enabled and negotiated by default with maintained runtime post-quantum hybrid key exchange.
+* **Modern Cipher Suites (TLS 1.2)**: ECDHE-ECDSA/RSA with AES-GCM and ChaCha20-Poly1305. All CBC, 3DES, RC4, and static RSA key-exchange ciphers are disabled.
+* **HTTP/2**: Supported automatically via ALPN (`h2`, `http/1.1`).
+* **Security Headers**: Injects `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, and `Strict-Transport-Security` (`max-age=31536000`) on HTTPS connections.
+* **Resource Exhaustion Protection**:
+  - `ReadHeaderTimeout`: 5 seconds
+  - `ReadTimeout`: 15 seconds
+  - `WriteTimeout`: 15 seconds
+  - `IdleTimeout`: 60 seconds
+  - `MaxHeaderBytes`: 1 MB (1 << 20)

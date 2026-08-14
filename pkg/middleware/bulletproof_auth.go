@@ -93,35 +93,35 @@ func BulletproofAuthMiddleware(replayStore ports.ReplayStore, keyStore map[strin
 
 			// Require headers for 5-Layer Security requests
 			if keyID == "" || signatureB64 == "" || nonce == "" || expiresAtStr == "" {
-				controller.WriteRFC7807Error(w, http.StatusUnauthorized, "UNAUTHORIZED", "Missing required 5-layer security headers (X-API-KEY-ID, X-SIGNATURE, X-NONCE, X-EXPIRES-AT)")
+				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Missing required 5-layer security headers (X-API-KEY-ID, X-SIGNATURE, X-NONCE, X-EXPIRES-AT)")
 				return
 			}
 
 			// Parse expiresAt timestamp
 			expiresAt, err := strconv.ParseInt(expiresAtStr, 10, 64)
 			if err != nil {
-				controller.WriteRFC7807Error(w, http.StatusBadRequest, "INVALID_HEADER", "X-EXPIRES-AT must be a valid Unix timestamp")
+				controller.WriteProblemDetailsError(w, r, http.StatusBadRequest, "INVALID_HEADER", "X-EXPIRES-AT must be a valid Unix timestamp")
 				return
 			}
 
 			// Layer 2: Client-Set TTL Expiry Check (with 30s clock skew buffer)
 			maxTTL := int64(900) // 15 minutes max TTL window
 			if err := security.ValidatePayloadTTL(expiresAt, maxTTL); err != nil {
-				controller.WriteRFC7807Error(w, http.StatusUnauthorized, "EXPIRED_TOKEN", err.Error())
+				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "EXPIRED_TOKEN", err.Error())
 				return
 			}
 
 			// Lookup registered API Key Details
 			keyDetails, exists := keyStore[keyID]
 			if !exists || !keyDetails.IsActive {
-				controller.WriteRFC7807Error(w, http.StatusUnauthorized, "INVALID_API_KEY", "API Key ID is invalid or inactive")
+				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "INVALID_API_KEY", "API Key ID is invalid or inactive")
 				return
 			}
 
 			// Parse Ed25519 Public Key
 			pubKey, err := security.ParseEd25519PublicKeyBase64(keyDetails.PublicKeyBase64)
 			if err != nil {
-				controller.WriteRFC7807Error(w, http.StatusInternalServerError, "KEY_PARSE_ERROR", "Failed to parse registered public key")
+				controller.WriteProblemDetailsError(w, r, http.StatusInternalServerError, "KEY_PARSE_ERROR", "Failed to parse registered public key")
 				return
 			}
 
@@ -129,7 +129,7 @@ func BulletproofAuthMiddleware(replayStore ports.ReplayStore, keyStore map[strin
 			clientIP := GetRealClientIP(r)
 			if config.AppConfig.EnforceStrictIPBinding || len(keyDetails.WhitelistedIPs) > 0 {
 				if !ValidateIPWhitelist(clientIP, keyDetails.WhitelistedIPs) {
-					controller.WriteRFC7807Error(w, http.StatusForbidden, "IP_NOT_ALLOWED", fmt.Sprintf("Client IP %s is not in the whitelisted access list", clientIP))
+					controller.WriteProblemDetailsError(w, r, http.StatusForbidden, "IP_NOT_ALLOWED", fmt.Sprintf("Client IP %s is not in the whitelisted access list", clientIP))
 					return
 				}
 			}
@@ -143,7 +143,7 @@ func BulletproofAuthMiddleware(replayStore ports.ReplayStore, keyStore map[strin
 
 				setOk, err := replayStore.CheckAndSet(r.Context(), keyID, nonce, ttlSeconds)
 				if err != nil || !setOk {
-					controller.WriteRFC7807Error(w, http.StatusUnauthorized, "REPLAY_ATTACK_DETECTED", "Duplicate request nonce detected (replay attack blocked)")
+					controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "REPLAY_ATTACK_DETECTED", "Duplicate request nonce detected (replay attack blocked)")
 					return
 				}
 			}
@@ -151,7 +151,7 @@ func BulletproofAuthMiddleware(replayStore ports.ReplayStore, keyStore map[strin
 			// Read request body to construct canonical signature message
 			bodyBytes, err := io.ReadAll(r.Body)
 			if err != nil {
-				controller.WriteRFC7807Error(w, http.StatusBadRequest, "INVALID_BODY", "Failed to read request payload body")
+				controller.WriteProblemDetailsError(w, r, http.StatusBadRequest, "INVALID_BODY", "Failed to read request payload body")
 				return
 			}
 			// Restore r.Body so downstream controllers can read it
@@ -163,13 +163,13 @@ func BulletproofAuthMiddleware(replayStore ports.ReplayStore, keyStore map[strin
 			// Decode Ed25519 signature
 			sigBytes, err := base64.StdEncoding.DecodeString(signatureB64)
 			if err != nil {
-				controller.WriteRFC7807Error(w, http.StatusBadRequest, "INVALID_SIGNATURE_FORMAT", "Signature must be base64 encoded")
+				controller.WriteProblemDetailsError(w, r, http.StatusBadRequest, "INVALID_SIGNATURE_FORMAT", "Signature must be base64 encoded")
 				return
 			}
 
 			// Layer 1: Ed25519 Asymmetric Signature Check
 			if !security.VerifyEd25519Signature(pubKey, []byte(canonicalMsg), sigBytes) {
-				controller.WriteRFC7807Error(w, http.StatusUnauthorized, "INVALID_SIGNATURE", "Ed25519 cryptographic signature verification failed")
+				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "INVALID_SIGNATURE", "Ed25519 cryptographic signature verification failed")
 				return
 			}
 

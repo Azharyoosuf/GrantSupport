@@ -27,7 +27,7 @@ func (AuditEvent) Annotations() []schema.Annotation {
 // Fields of the AuditEvent.
 func (AuditEvent) Fields() []ent.Field {
 	return []ent.Field{
-		field.UUID("id", uuid.UUID{}).Default(uuid.New),
+		field.UUID("id", uuid.UUID{}).Default(func() uuid.UUID { return uuid.Must(uuid.NewV7()) }),
 		field.UUID("institution_id", uuid.UUID{}),
 		field.UUID("actor_id", uuid.UUID{}),
 		field.String("event_type"),
