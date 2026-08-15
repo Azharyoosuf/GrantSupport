@@ -1,5 +1,6 @@
-# Multi-stage Dockerfile for GrantSupport Standalone Engine
-FROM golang:alpine AS builder
+# Multi-stage Dockerfile for GrantSupport Standalone Engine with native cross-compilation
+# syntax=docker/dockerfile:1
+FROM --platform=$BUILDPLATFORM golang:alpine AS builder
 
 WORKDIR /app
 
@@ -10,7 +11,8 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o /app/grantsupport cmd/server/main.go
+ARG TARGETOS TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -ldflags="-w -s" -o /app/grantsupport cmd/server/main.go
 
 # Minimal distroless runtime image
 FROM gcr.io/distroless/static-debian12:nonroot
