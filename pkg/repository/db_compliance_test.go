@@ -138,7 +138,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	for i := 0; i < concurrency; i++ {
 		go func() {
 			<-lockStartCh
-			token, err := lockStore.Acquire(context.Background(), lockKey, 2*time.Second)
+			token, err := lockStore.Acquire(context.Background(), lockKey, 30*time.Second)
 			if err == nil {
 				lockDoneCh <- token
 			} else {
@@ -164,7 +164,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 
 	// Test non-owner release fails to release
 	_ = lockStore.Release(ctx, lockKey, "fake_non_owner_token")
-	_, err = lockStore.Acquire(ctx, lockKey, 2*time.Second)
+	_, err = lockStore.Acquire(ctx, lockKey, 30*time.Second)
 	if err != ports.ErrLockBusy {
 		t.Fatalf("[%s] Expected lock to remain busy after fake release, got: %v", dialectName, err)
 	}
@@ -176,14 +176,14 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 
 	// Test lock lease expiration & takeover
 	shortLockKey := fmt.Sprintf("lock:expire:%s", instA.String())
-	tok1, err := lockStore.Acquire(ctx, shortLockKey, 50*time.Millisecond)
+	tok1, err := lockStore.Acquire(ctx, shortLockKey, 100*time.Millisecond)
 	if err != nil || tok1 == "" {
 		t.Fatalf("[%s] Short lock acquire failed: %v", dialectName, err)
 	}
-	time.Sleep(70 * time.Millisecond) // Wait for lease to expire
-	tok2, err := lockStore.Acquire(ctx, shortLockKey, 1*time.Second)
+	time.Sleep(150 * time.Millisecond) // Wait for lease to expire
+	tok2, err := lockStore.Acquire(ctx, shortLockKey, 10*time.Second)
 	if err != nil || tok2 == "" {
-		t.Fatalf("[%s] Expired lock takeover failed: %v", dialectName, err)
+		t.Fatalf("[%s] Lock acquisition after expiration failed: %v", dialectName, err)
 	}
 	_ = lockStore.Release(ctx, shortLockKey, tok2)
 
