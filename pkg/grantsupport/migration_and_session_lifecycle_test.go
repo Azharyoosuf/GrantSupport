@@ -493,3 +493,84 @@ func TestCrossDialectLiveDatabaseUpgrade(t *testing.T) {
 		})
 	}
 }
+
+// TestSQLMigrationFiles_FullLifecycle tests direct execution of physical .sql files for UP -> DOWN -> Re-UP.
+func TestSQLMigrationFiles_FullLifecycle(t *testing.T) {
+	ctx := context.Background()
+
+	// 1. Test SQLite physical migration files
+	t.Run("SQLite_PhysicalMigrationFiles", func(t *testing.T) {
+		dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.New().String())
+		db, err := sql.Open("sqlite", dbName)
+		if err != nil {
+			t.Fatalf("Failed to open SQLite: %v", err)
+		}
+		defer db.Close()
+
+		up1, err := os.ReadFile("../../migrations/sqlite/000001_initial_grantsupport_schema.up.sql")
+		if err != nil {
+			t.Fatalf("Failed to read 000001.up: %v", err)
+		}
+		up2, err := os.ReadFile("../../migrations/sqlite/000002_add_used_by_id_to_support_grants.up.sql")
+		if err != nil {
+			t.Fatalf("Failed to read 000002.up: %v", err)
+		}
+		up3, err := os.ReadFile("../../migrations/sqlite/000003_add_access_requests.up.sql")
+		if err != nil {
+			t.Fatalf("Failed to read 000003.up: %v", err)
+		}
+
+		down3, err := os.ReadFile("../../migrations/sqlite/000003_add_access_requests.down.sql")
+		if err != nil {
+			t.Fatalf("Failed to read 000003.down: %v", err)
+		}
+		down2, err := os.ReadFile("../../migrations/sqlite/000002_add_used_by_id_to_support_grants.down.sql")
+		if err != nil {
+			t.Fatalf("Failed to read 000002.down: %v", err)
+		}
+		down1, err := os.ReadFile("../../migrations/sqlite/000001_initial_grantsupport_schema.down.sql")
+		if err != nil {
+			t.Fatalf("Failed to read 000001.down: %v", err)
+		}
+
+		// A. Execute UP: 1 -> 2 -> 3
+		for _, script := range [][]byte{up1, up2, up3} {
+			if _, err := db.ExecContext(ctx, string(script)); err != nil {
+				t.Fatalf("UP migration execution failed: %v\nScript: %s", err, string(script))
+			}
+		}
+
+		// Verify tables exist
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err != nil {
+			t.Fatalf("Expected gs_access_requests table to exist after UP: %v", err)
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants").Scan(&count); err != nil {
+			t.Fatalf("Expected gs_support_grants table to exist after UP: %v", err)
+		}
+
+		// B. Execute DOWN: 3 -> 2 -> 1
+		for _, script := range [][]byte{down3, down2, down1} {
+			if _, err := db.ExecContext(ctx, string(script)); err != nil {
+				t.Fatalf("DOWN migration execution failed: %v\nScript: %s", err, string(script))
+			}
+		}
+
+		// Verify tables dropped
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
+			t.Fatalf("Expected gs_access_requests to be dropped after DOWN")
+		}
+
+		// C. Execute Re-UP: 1 -> 2 -> 3
+		for _, script := range [][]byte{up1, up2, up3} {
+			if _, err := db.ExecContext(ctx, string(script)); err != nil {
+				t.Fatalf("Re-UP migration execution failed: %v\nScript: %s", err, string(script))
+			}
+		}
+
+		// Verify tables re-created
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err != nil {
+			t.Fatalf("Expected gs_access_requests table to exist after Re-UP: %v", err)
+		}
+	})
+}

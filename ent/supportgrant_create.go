@@ -178,6 +178,10 @@ func (sgc *SupportGrantCreate) defaults() {
 		v := supportgrant.DefaultScope
 		sgc.mutation.SetScope(v)
 	}
+	if _, ok := sgc.mutation.WhitelistedIps(); !ok {
+		v := supportgrant.DefaultWhitelistedIps
+		sgc.mutation.SetWhitelistedIps(v)
+	}
 	if _, ok := sgc.mutation.CreatedAt(); !ok {
 		v := supportgrant.DefaultCreatedAt()
 		sgc.mutation.SetCreatedAt(v)

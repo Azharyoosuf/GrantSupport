@@ -45,3 +45,13 @@ profile.out
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# Internal AI Workspace & Agent configurations
+.agents/
+
+# Monolithic source code export snapshots
+GRANTSUPPORT_*.md
+
+# Temporary build directory
+.gotmp/
+

@@ -80,11 +80,6 @@ func HashChain(v string) predicate.AuditEvent {
 	return predicate.AuditEvent(sql.FieldEQ(FieldHashChain, v))
 }
 
-// Signature applies equality check predicate on the "signature" field. It's identical to SignatureEQ.
-func Signature(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldEQ(FieldSignature, v))
-}
-
 // CreatedAt applies equality check predicate on the "created_at" field. It's identical to CreatedAtEQ.
 func CreatedAt(v time.Time) predicate.AuditEvent {
 	return predicate.AuditEvent(sql.FieldEQ(FieldCreatedAt, v))
@@ -383,81 +378,6 @@ func HashChainEqualFold(v string) predicate.AuditEvent {
 // HashChainContainsFold applies the ContainsFold predicate on the "hash_chain" field.
 func HashChainContainsFold(v string) predicate.AuditEvent {
 	return predicate.AuditEvent(sql.FieldContainsFold(FieldHashChain, v))
-}
-
-// SignatureEQ applies the EQ predicate on the "signature" field.
-func SignatureEQ(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldEQ(FieldSignature, v))
-}
-
-// SignatureNEQ applies the NEQ predicate on the "signature" field.
-func SignatureNEQ(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldNEQ(FieldSignature, v))
-}
-
-// SignatureIn applies the In predicate on the "signature" field.
-func SignatureIn(vs ...string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldIn(FieldSignature, vs...))
-}
-
-// SignatureNotIn applies the NotIn predicate on the "signature" field.
-func SignatureNotIn(vs ...string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldNotIn(FieldSignature, vs...))
-}
-
-// SignatureGT applies the GT predicate on the "signature" field.
-func SignatureGT(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldGT(FieldSignature, v))
-}
-
-// SignatureGTE applies the GTE predicate on the "signature" field.
-func SignatureGTE(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldGTE(FieldSignature, v))
-}
-
-// SignatureLT applies the LT predicate on the "signature" field.
-func SignatureLT(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldLT(FieldSignature, v))
-}
-
-// SignatureLTE applies the LTE predicate on the "signature" field.
-func SignatureLTE(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldLTE(FieldSignature, v))
-}
-
-// SignatureContains applies the Contains predicate on the "signature" field.
-func SignatureContains(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldContains(FieldSignature, v))
-}
-
-// SignatureHasPrefix applies the HasPrefix predicate on the "signature" field.
-func SignatureHasPrefix(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldHasPrefix(FieldSignature, v))
-}
-
-// SignatureHasSuffix applies the HasSuffix predicate on the "signature" field.
-func SignatureHasSuffix(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldHasSuffix(FieldSignature, v))
-}
-
-// SignatureIsNil applies the IsNil predicate on the "signature" field.
-func SignatureIsNil() predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldIsNull(FieldSignature))
-}
-
-// SignatureNotNil applies the NotNil predicate on the "signature" field.
-func SignatureNotNil() predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldNotNull(FieldSignature))
-}
-
-// SignatureEqualFold applies the EqualFold predicate on the "signature" field.
-func SignatureEqualFold(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldEqualFold(FieldSignature, v))
-}
-
-// SignatureContainsFold applies the ContainsFold predicate on the "signature" field.
-func SignatureContainsFold(v string) predicate.AuditEvent {
-	return predicate.AuditEvent(sql.FieldContainsFold(FieldSignature, v))
 }
 
 // CreatedAtEQ applies the EQ predicate on the "created_at" field.

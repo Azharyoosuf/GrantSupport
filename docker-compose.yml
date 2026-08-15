@@ -11,13 +11,14 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - ENVIRONMENT=development
+      - GO_ENV=development
       - PORT=8080
       - DATABASE_DIALECT=postgres
       - DATABASE_URL=postgresql://grantsupport:secretpassword@postgres:5432/grantsupport?sslmode=disable
       - VALKEY_CACHE_URL=valkey://valkey:6379/0
       - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY}
       - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+      # WARNING: these are publicly-known test values for local development ONLY. Generate real random values before any non-local deployment — see .env.example.
       - MASTER_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
       - LOCAL_SECRET_KEY=0123456789abcdef0123456789abcdef
     depends_on:
@@ -41,12 +42,13 @@ services:
     ports:
       - "8081:8080"
     environment:
-      - ENVIRONMENT=development
+      - GO_ENV=development
       - PORT=8080
       - DATABASE_DIALECT=mysql
       - DATABASE_URL=grantsupport:secretpassword@tcp(mysql:3306)/grantsupport?parseTime=true
       - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY}
       - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+      # WARNING: these are publicly-known test values for local development ONLY. Generate real random values before any non-local deployment — see .env.example.
       - MASTER_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
       - LOCAL_SECRET_KEY=0123456789abcdef0123456789abcdef
     depends_on:
@@ -67,12 +69,13 @@ services:
     ports:
       - "8082:8080"
     environment:
-      - ENVIRONMENT=development
+      - GO_ENV=development
       - PORT=8080
       - DATABASE_DIALECT=sqlite
       - DATABASE_URL=file:/data/grantsupport.db?cache=shared&_pragma=foreign_keys(1)&_fk=1&_pragma=busy_timeout(5000)
       - JWT_PRIVATE_KEY=${JWT_PRIVATE_KEY}
       - JWT_PUBLIC_KEY=${JWT_PUBLIC_KEY}
+      # WARNING: these are publicly-known test values for local development ONLY. Generate real random values before any non-local deployment — see .env.example.
       - MASTER_ENCRYPTION_KEY=0123456789abcdef0123456789abcdef
       - LOCAL_SECRET_KEY=0123456789abcdef0123456789abcdef
     volumes:

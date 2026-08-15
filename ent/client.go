@@ -11,6 +11,7 @@ import (
 
 	"grantsupport/ent/migrate"
 
+	"grantsupport/ent/accessrequest"
 	"grantsupport/ent/auditevent"
 	"grantsupport/ent/supportgrant"
 
@@ -25,6 +26,8 @@ type Client struct {
 	config
 	// Schema is the client for creating, migrating and dropping schema.
 	Schema *migrate.Schema
+	// AccessRequest is the client for interacting with the AccessRequest builders.
+	AccessRequest *AccessRequestClient
 	// AuditEvent is the client for interacting with the AuditEvent builders.
 	AuditEvent *AuditEventClient
 	// SupportGrant is the client for interacting with the SupportGrant builders.
@@ -40,6 +43,7 @@ func NewClient(opts ...Option) *Client {
 
 func (c *Client) init() {
 	c.Schema = migrate.NewSchema(c.driver)
+	c.AccessRequest = NewAccessRequestClient(c.config)
 	c.AuditEvent = NewAuditEventClient(c.config)
 	c.SupportGrant = NewSupportGrantClient(c.config)
 }
@@ -132,10 +136,11 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 	cfg := c.config
 	cfg.driver = tx
 	return &Tx{
-		ctx:          ctx,
-		config:       cfg,
-		AuditEvent:   NewAuditEventClient(cfg),
-		SupportGrant: NewSupportGrantClient(cfg),
+		ctx:           ctx,
+		config:        cfg,
+		AccessRequest: NewAccessRequestClient(cfg),
+		AuditEvent:    NewAuditEventClient(cfg),
+		SupportGrant:  NewSupportGrantClient(cfg),
 	}, nil
 }
 
@@ -153,17 +158,18 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 	cfg := c.config
 	cfg.driver = &txDriver{tx: tx, drv: c.driver}
 	return &Tx{
-		ctx:          ctx,
-		config:       cfg,
-		AuditEvent:   NewAuditEventClient(cfg),
-		SupportGrant: NewSupportGrantClient(cfg),
+		ctx:           ctx,
+		config:        cfg,
+		AccessRequest: NewAccessRequestClient(cfg),
+		AuditEvent:    NewAuditEventClient(cfg),
+		SupportGrant:  NewSupportGrantClient(cfg),
 	}, nil
 }
 
 // Debug returns a new debug-client. It's used to get verbose logging on specific operations.
 //
 //	client.Debug().
-//		AuditEvent.
+//		AccessRequest.
 //		Query().
 //		Count(ctx)
 func (c *Client) Debug() *Client {
@@ -185,6 +191,7 @@ func (c *Client) Close() error {
 // Use adds the mutation hooks to all the entity clients.
 // In order to add hooks to a specific client, call: `client.Node.Use(...)`.
 func (c *Client) Use(hooks ...Hook) {
+	c.AccessRequest.Use(hooks...)
 	c.AuditEvent.Use(hooks...)
 	c.SupportGrant.Use(hooks...)
 }
@@ -192,6 +199,7 @@ func (c *Client) Use(hooks ...Hook) {
 // Intercept adds the query interceptors to all the entity clients.
 // In order to add interceptors to a specific client, call: `client.Node.Intercept(...)`.
 func (c *Client) Intercept(interceptors ...Interceptor) {
+	c.AccessRequest.Intercept(interceptors...)
 	c.AuditEvent.Intercept(interceptors...)
 	c.SupportGrant.Intercept(interceptors...)
 }
@@ -199,12 +207,147 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 // Mutate implements the ent.Mutator interface.
 func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 	switch m := m.(type) {
+	case *AccessRequestMutation:
+		return c.AccessRequest.mutate(ctx, m)
 	case *AuditEventMutation:
 		return c.AuditEvent.mutate(ctx, m)
 	case *SupportGrantMutation:
 		return c.SupportGrant.mutate(ctx, m)
 	default:
 		return nil, fmt.Errorf("ent: unknown mutation type %T", m)
+	}
+}
+
+// AccessRequestClient is a client for the AccessRequest schema.
+type AccessRequestClient struct {
+	config
+}
+
+// NewAccessRequestClient returns a client for the AccessRequest from the given config.
+func NewAccessRequestClient(c config) *AccessRequestClient {
+	return &AccessRequestClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `accessrequest.Hooks(f(g(h())))`.
+func (c *AccessRequestClient) Use(hooks ...Hook) {
+	c.hooks.AccessRequest = append(c.hooks.AccessRequest, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `accessrequest.Intercept(f(g(h())))`.
+func (c *AccessRequestClient) Intercept(interceptors ...Interceptor) {
+	c.inters.AccessRequest = append(c.inters.AccessRequest, interceptors...)
+}
+
+// Create returns a builder for creating a AccessRequest entity.
+func (c *AccessRequestClient) Create() *AccessRequestCreate {
+	mutation := newAccessRequestMutation(c.config, OpCreate)
+	return &AccessRequestCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of AccessRequest entities.
+func (c *AccessRequestClient) CreateBulk(builders ...*AccessRequestCreate) *AccessRequestCreateBulk {
+	return &AccessRequestCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *AccessRequestClient) MapCreateBulk(slice any, setFunc func(*AccessRequestCreate, int)) *AccessRequestCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &AccessRequestCreateBulk{err: fmt.Errorf("calling to AccessRequestClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*AccessRequestCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &AccessRequestCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for AccessRequest.
+func (c *AccessRequestClient) Update() *AccessRequestUpdate {
+	mutation := newAccessRequestMutation(c.config, OpUpdate)
+	return &AccessRequestUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *AccessRequestClient) UpdateOne(ar *AccessRequest) *AccessRequestUpdateOne {
+	mutation := newAccessRequestMutation(c.config, OpUpdateOne, withAccessRequest(ar))
+	return &AccessRequestUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *AccessRequestClient) UpdateOneID(id uuid.UUID) *AccessRequestUpdateOne {
+	mutation := newAccessRequestMutation(c.config, OpUpdateOne, withAccessRequestID(id))
+	return &AccessRequestUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for AccessRequest.
+func (c *AccessRequestClient) Delete() *AccessRequestDelete {
+	mutation := newAccessRequestMutation(c.config, OpDelete)
+	return &AccessRequestDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *AccessRequestClient) DeleteOne(ar *AccessRequest) *AccessRequestDeleteOne {
+	return c.DeleteOneID(ar.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *AccessRequestClient) DeleteOneID(id uuid.UUID) *AccessRequestDeleteOne {
+	builder := c.Delete().Where(accessrequest.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &AccessRequestDeleteOne{builder}
+}
+
+// Query returns a query builder for AccessRequest.
+func (c *AccessRequestClient) Query() *AccessRequestQuery {
+	return &AccessRequestQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeAccessRequest},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a AccessRequest entity by its id.
+func (c *AccessRequestClient) Get(ctx context.Context, id uuid.UUID) (*AccessRequest, error) {
+	return c.Query().Where(accessrequest.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *AccessRequestClient) GetX(ctx context.Context, id uuid.UUID) *AccessRequest {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *AccessRequestClient) Hooks() []Hook {
+	return c.hooks.AccessRequest
+}
+
+// Interceptors returns the client interceptors.
+func (c *AccessRequestClient) Interceptors() []Interceptor {
+	return c.inters.AccessRequest
+}
+
+func (c *AccessRequestClient) mutate(ctx context.Context, m *AccessRequestMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&AccessRequestCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&AccessRequestUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&AccessRequestUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&AccessRequestDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown AccessRequest mutation op: %q", m.Op())
 	}
 }
 
@@ -477,9 +620,9 @@ func (c *SupportGrantClient) mutate(ctx context.Context, m *SupportGrantMutation
 // hooks and interceptors per client, for fast access.
 type (
 	hooks struct {
-		AuditEvent, SupportGrant []ent.Hook
+		AccessRequest, AuditEvent, SupportGrant []ent.Hook
 	}
 	inters struct {
-		AuditEvent, SupportGrant []ent.Interceptor
+		AccessRequest, AuditEvent, SupportGrant []ent.Interceptor
 	}
 )

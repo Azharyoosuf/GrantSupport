@@ -1,150 +1,293 @@
-# Developer Integration Guide
+# GrantSupport Developer Integration Guide
 
-This guide walks developers step-by-step through integrating **GrantSupport** into an existing or new web application.
-
----
-
-## 1. Prerequisites
-
-Before integrating GrantSupport, ensure your environment provides:
-* **Go 1.22+** (for Go native SDK / microservice deployment)
-* **PostgreSQL 14+** (for local data plane storage)
-* **Valkey 7.2+ or Redis 7+** (for distributed locking & token version caching)
+This guide details how to integrate GrantSupport into your multi-tenant SaaS platform, covering both the **Language-Agnostic HTTP REST API** (primary) and the **Embedded Go Engine** (secondary).
 
 ---
 
-## 2. Step 1 — Database Migration Setup
+## 1. Integration Architecture & Network Model
 
-Run the GrantSupport database migration script to set up `SupportGrant`, `AuditEvent`, and append-only immutability triggers:
+GrantSupport is an internal infrastructure service designed for backend-to-backend communication:
+
+```
+[Browser / Admin Dashboard]
+            │
+            ▼ (Session Cookie / OAuth)
+[Host Application Backend (Proxy / BFF)]
+            │
+            ▼ (Internal VPC / Service-to-Service HTTP)
+[GrantSupport API (:8080)]
+```
+
+> **CORS Notice**: GrantSupport does not attach Cross-Origin Resource Sharing (`Access-Control-Allow-Origin`) headers. Your host application's backend should handle administrative requests and forward calls to GrantSupport internally.
+
+---
+
+## 2. HTTP REST API Integration (Primary)
+
+The HTTP API is language-agnostic. All request payloads must be `application/json` and error responses follow the **RFC 9457 Problem Details** standard (`application/problem+json`).
+
+### Step 1: Create a Delegated Support Grant (Customer Administrator)
+When a customer administrator clicks "Grant Support Access" in your settings dashboard, your backend issues a request to GrantSupport:
 
 ```bash
-psql -h localhost -U postgres -d your_app_db -f migrations/000001_create_grantsupport_tables.sql
-psql -h localhost -U postgres -d your_app_db -f migrations/000002_add_immutability_triggers.sql
+curl -X POST http://localhost:8080/api/v1/auth/support/grant \
+  -H "Authorization: Bearer <ADMIN_JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "durationMinutes": 60,
+    "scope": "BILLING_READ_ONLY",
+    "whitelistedIps": ["198.51.100.4", "203.0.113.0/24"]
+  }'
+```
+
+#### Request Fields (`GrantSupportInput`):
+* `durationMinutes` (*required, int*): Grant lifetime in minutes (1 to 1440).
+* `scope` (*optional, string*): Permission label passed to the JWT (default: `FULL_ACCESS`).
+* `whitelistedIps` (*optional, []string*): Array of authorized IPv4/IPv6 addresses or CIDR subnets.
+
+#### Response (`201 Created`):
+```json
+{
+  "success": true,
+  "message": "Support access token generated successfully.",
+  "token": "550e8400-e29b-41d4-a716-446655440000_9f83a8b9487c6e12e2057639f28d8442..."
+}
 ```
 
 ---
 
-## 3. Step 2 — Configuration Setup
+### Step 2: Support Agent Login (Claim Single-Use Token)
+The support agent enters the token into the support portal. The support portal backend calls GrantSupport to claim the token:
 
-Create an `.env` file or export environment variables for GrantSupport:
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/support/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "token": "550e8400-e29b-41d4-a716-446655440000_9f83a8b9487c6e12e2057639f28d8442...",
+    "agentId": "7f4c935b-16d7-4f9e-a8f2-39c4a852b719"
+  }'
+```
 
-```env
-# Server Configuration
-PORT=8085
-NODE_ENV=production
+#### Request Fields (`SupportLoginInput`):
+* `token` (*required, string*): The raw support token string.
+* `agentId` (*required, string UUID*): The explicit UUID of the support engineer claiming the session.
 
-# Database & Cache (Data Plane)
-DATABASE_DIALECT=postgres
-DATABASE_URL=postgres://postgres:password@localhost:5432/your_app_db?sslmode=disable
-VALKEY_CACHE_URL=valkey://localhost:6379/0
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Support agent authenticated successfully.",
+  "institution_id": "550e8400-e29b-41d4-a716-446655440000",
+  "access_token": "eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
 
-# JWT Signing Keys (RSA-2048)
-JWT_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n..."
-JWT_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----\n..."
+> **Security Note on Single-Use**: Attempting to reuse the same token a second time immediately returns HTTP 401 Problem Details (`SUPPORT_LOGIN_FAILED`).
+
+---
+
+### Step 3: Using the Support Agent JWT in Your Application
+The support agent attaches the `access_token` as a Bearer token in requests to your application:
+
+```bash
+curl -X GET https://api.yourcompany.com/v1/invoices \
+  -H "Authorization: Bearer <SUPPORT_AGENT_JWT>"
+```
+
+#### Important: Scope Enforcement Responsibility
+GrantSupport places the `scope` (e.g. `BILLING_READ_ONLY`) and `role: SUPPORT_AGENT` in the JWT payload. **GrantSupport does not enforce your application's database permissions.** Your application must verify:
+1. Verify the JWT signature using GrantSupport's public key (`JWT_PUBLIC_KEY`).
+2. Inspect the `role` and `scope` claims to restrict actions (e.g. read-only vs write).
+
+---
+
+### Step 4: Voluntary Support Agent Logout
+When the support agent finishes their task, they voluntarily terminate their session:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/support/logout \
+  -H "Authorization: Bearer <SUPPORT_AGENT_JWT>"
+```
+
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "Support agent session logged out successfully."
+}
 ```
 
 ---
 
-## 4. Step 3 — Adding GrantSupport Endpoints to Your Router
+### Step 5: Optional In-Band JIT Access Request & Approval Workflow
 
-In your Go Chi web router, mount the GrantSupport controller handlers:
+GrantSupport allows support agents to initiate access requests that customer administrators review and approve in-band.
+
+#### 1. Agent Submits Access Request (`POST /api/v1/access-requests`):
+```bash
+curl -X POST http://localhost:8080/api/v1/access-requests \
+  -H "Authorization: Bearer <AGENT_JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "targetService": "billing-service",
+    "reason": "Investigating ticket #8492 - customer payment discrepancy",
+    "durationMinutes": 60,
+    "scope": "billing:read",
+    "whitelistedIps": ["198.51.100.4"]
+  }'
+```
+
+#### 2. Customer Admin Approves Access Request (`POST /api/v1/access-requests/{id}/approve`):
+```bash
+curl -X POST http://localhost:8080/api/v1/access-requests/01a004a0-7b2c-7b28-9e5d-e88103bc9505/approve \
+  -H "Authorization: Bearer <ADMIN_JWT>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "durationMinutes": 45,
+    "scope": "billing:read"
+  }'
+```
+
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "requestId": "01a004a0-7b2c-7b28-9e5d-e88103bc9505",
+  "status": "APPROVED",
+  "grantId": "01a004a1-17c3-7b32-97fc-fa9214d394c0",
+  "rawToken": "550e8400-e29b-41d4-a716-446655440000_f92b4c10e82a4d70923f1b0a...",
+  "expiresAt": "2026-08-15T15:30:00Z"
+}
+```
+
+> [!IMPORTANT]
+> **Token Delivery Boundary & Operational Limitation**:
+> "Approval controls whether access may be granted. GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel."
+
+---
+
+### Step 6: Customer Admin Immediate Revocation
+If a customer administrator wants to immediately revoke all active vendor access for their tenant:
+
+```bash
+curl -X POST http://localhost:8080/api/v1/auth/support/revoke \
+  -H "Authorization: Bearer <ADMIN_JWT>"
+```
+
+#### Response (`200 OK`):
+```json
+{
+  "success": true,
+  "message": "All support delegations revoked successfully."
+}
+```
+*Result: All pending unredeemed tokens for this tenant are expired, and all active support agent JWT sessions are invalidated in the revocation store.*
+
+---
+
+## 3. Go In-Process Embedding (Secondary)
+
+If your host application is written in Go, you can embed GrantSupport directly:
 
 ```go
 package main
 
 import (
-	"net/http"
-	"github.com/go-chi/chi/v5"
-	"grantsupport/pkg/controller"
-	"grantsupport/pkg/middleware"
+	"context"
+	"database/sql"
+	"log"
+	"time"
+
+	"github.com/google/uuid"
+	_ "modernc.org/sqlite"
+	"grantsupport/pkg/grantsupport"
 )
 
-func RegisterSupportRoutes(r chi.Router, deps *Dependencies) {
-	// Public Support Agent Login Endpoint (Agents redeem token for JWT)
-	r.Post("/api/v1/auth/support/login", controller.CatchAsync(deps.SupportController.SupportLogin))
+func main() {
+	ctx := context.Background()
 
-	// Authenticated Support Agent Logout Endpoint
-	r.Group(func(r chi.Router) {
-		r.Use(middleware.RequireRoles("SUPPORT_AGENT"))
-		r.Post("/api/v1/auth/support/logout", controller.CatchAsync(deps.SupportController.SupportLogout))
-	})
+	// 1. Initialize with caller-managed database pool
+	db, err := sql.Open("sqlite", "file:app.db?cache=shared&_pragma=foreign_keys(1)")
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// Customer-Admin Role-Gated Delegation Endpoints
-	r.Group(func(r chi.Router) {
-		r.Use(middleware.RequireRoles("ADMINISTRATOR", "OWNER", "ADMIN"))
-		
-		// Customer Admin issues new support grant token
-		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(deps.SupportController.GrantSupport))
-		
-		// Customer Admin revokes all active support tokens and active sessions
-		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(deps.SupportController.RevokeSupport))
-	})
+	engine, err := grantsupport.NewEngine(
+		grantsupport.WithDB(db, "sqlite"),
+		grantsupport.WithAutoMigrate(true),
+	)
+	if err != nil {
+		log.Fatalf("Failed to initialize engine: %v", err)
+	}
+	defer engine.Close()
+
+	instID := uuid.New()
+	adminID := uuid.New()
+	agentID := uuid.New()
+
+	// 2. Create support grant in Go
+	token, err := engine.CreateSupportGrant(ctx, instID, adminID, 60, "READ_ONLY", []string{"198.51.100.4"})
+	if err != nil {
+		log.Fatalf("Create grant failed: %v", err)
+	}
+
+	// 3. Redeem grant in Go
+	tenantID, jwtToken, err := engine.SupportLogin(ctx, token, agentID, "198.51.100.4")
+	if err != nil {
+		log.Fatalf("Support login failed: %v", err)
+	}
+	log.Printf("Issued JWT for tenant %s: %s", tenantID, jwtToken[:30])
+
+	// 4. Verify audit ledger integrity
+	valid, err := engine.VerifyAuditChain(ctx, instID)
+	if err != nil || !valid {
+		log.Fatalf("Audit chain verification failed: %v", err)
+	}
+
+	// 5. Admin revoke
+	if err := engine.RevokeSupportGrant(ctx, instID, adminID); err != nil {
+		log.Fatalf("Revoke failed: %v", err)
+	}
 }
 ```
 
 ---
 
-## 5. Step 4 — Embedding the Customer Grant UI Widget
+## 4. Standardized Scope Policy & Matching (`pkg/scope`)
 
-Include the lightweight GrantSupport frontend widget in your web application's settings dashboard:
+GrantSupport carries the `scope` string through the RS256 JWT claim. Application-level domain authorization is enforced by your host application. To simplify hierarchical permission evaluation, GrantSupport provides the pure-Go `pkg/scope` utility:
 
-```html
-<!-- Settings -> Support Access Panel -->
-<div id="grantsupport-widget" class="card shadow-sm p-4">
-  <h3>Delegated Support Access</h3>
-  <p class="text-muted">Grant temporary, audited access to customer support engineers or AI diagnostics.</p>
-  
-  <div class="d-flex gap-3 align-items-center mt-3">
-    <select id="grant-duration" class="form-select w-auto">
-      <option value="15">15 Minutes</option>
-      <option value="60" selected>1 Hour</option>
-      <option value="240">4 Hours</option>
-    </select>
-    
-    <button id="btn-grant-access" class="btn btn-primary" onclick="generateSupportGrant()">
-      Grant Support Access
-    </button>
-    <button id="btn-revoke-access" class="btn btn-danger" onclick="revokeSupportAccess()">
-      Revoke All Access
-    </button>
-  </div>
-  
-  <div id="grant-output" class="alert alert-info mt-3 d-none">
-    <strong>Support Token:</strong> <code id="token-text"></code>
-    <br><small>Provide this token to your support engineer or diagnostic bot.</small>
-  </div>
-</div>
+```go
+import "grantsupport/pkg/scope"
 
-<script>
-async function generateSupportGrant() {
-  const duration = parseInt(document.getElementById('grant-duration').value);
-  const response = await fetch('/api/v1/auth/support/grant', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ duration_minutes: duration })
-  });
-  const data = await response.json();
-  if (data.success) {
-    document.getElementById('token-text').innerText = data.grant_token;
-    document.getElementById('grant-output').classList.remove('d-none');
-  }
-}
-</script>
+// 1. Wildcard subtree matching
+scope.Matches("billing:*", "billing:read")            // true
+scope.Matches("billing:*", "billing:read:export:csv") // true
+
+// 2. Exact matching
+scope.Matches("billing:read", "billing:read")         // true
+scope.Matches("billing:read", "billing:write")        // false
+
+// 3. Multi-scope string parsing (comma or space separated)
+scope.Matches("billing:read, org:admin", "org:admin") // true
+
+// 4. Global wildcard
+scope.Matches("*", "any:arbitrary:scope")             // true
 ```
 
 ---
 
-## 6. Step 5 — Verification & Testing
+## 5. Webhooks & Event Durability Boundaries
 
-Verify that your integration works properly by running:
+GrantSupport emits signed HMAC-SHA256 webhooks for grant and session lifecycle transitions:
+* `grant.created`
+* `grant.claimed`
+* `grant.revoked`
+* `session.terminated`
 
-```bash
-# Test 1: Verify license signature check
-go test ./pkg/license/... -v
+### Durability & Retry Boundary
+* **In-Memory Bounded Queue**: Retries are buffered in-memory up to a capacity limit of **5,000 events**.
+* **Retry Schedule**: Bounded at **3 delivery attempts** with exponential backoff (1s, 5s, 15s).
+* **Crash Semantics**: Pending in-memory retries are **ephemeral** and will be lost if the server process crashes. For mission-critical external auditing, poll the append-only `GET /api/v1/audit/events` REST API.
+* **Dead-Letter Handling**: Events that exhaust 3 delivery attempts emit `WARN [WEBHOOK_DEAD_LETTER]` and are safely dropped to prevent memory leaks.
 
-# Test 2: Verify support login token consumption
-go test ./pkg/service/... -run TestSupportLogin -v
-
-# Test 3: Run full parity check
-python scripts/parity_audit.py
-```

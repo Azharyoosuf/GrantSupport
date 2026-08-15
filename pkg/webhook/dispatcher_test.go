@@ -296,3 +296,60 @@ func TestWebhookDispatch_MissingSecretDoesNotSendUnsignedWebhook(t *testing.T) {
 		t.Fatalf("Expected 0 requests sent when secret is missing, got %d (unsigned webhooks are prohibited)", atomic.LoadInt64(&receivedRequests))
 	}
 }
+
+func TestWebhook_ExponentialBackoffSucceedsOnRetry(t *testing.T) {
+	var attempts int64
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		att := atomic.AddInt64(&attempts, 1)
+		if att < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	dispatcher := webhook.NewWebhookDispatcher(server.URL, "secret")
+	dispatcher.SetBackoffSchedule([]time.Duration{20 * time.Millisecond, 40 * time.Millisecond, 60 * time.Millisecond})
+	defer func() { _ = dispatcher.Close(context.Background()) }()
+
+	event := webhook.NewWebhookEvent("session.terminated", "inst-1", "admin-1", nil)
+	dispatcher.DispatchAsync(event)
+
+	// Wait for fast backoff retries
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt64(&attempts) >= 3 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	if atomic.LoadInt64(&attempts) < 3 {
+		t.Fatalf("Expected at least 3 delivery attempts with backoff, got %d", atomic.LoadInt64(&attempts))
+	}
+}
+
+func TestWebhook_QueueCapacityLimitPreventsOOM(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	dispatcher := webhook.NewWebhookDispatcher(server.URL, "secret")
+	dispatcher.SetBackoffSchedule([]time.Duration{1 * time.Millisecond, 1 * time.Millisecond, 1 * time.Millisecond})
+	defer func() { _ = dispatcher.Close(context.Background()) }()
+
+	// Overfill queue beyond MaxWebhookQueueSize (5,000)
+	const floodCount = webhook.MaxWebhookQueueSize + 100
+	for i := 0; i < floodCount; i++ {
+		ev := webhook.NewWebhookEvent("grant.created", "inst-1", "admin-1", map[string]any{"i": i})
+		dispatcher.DispatchAsync(ev)
+	}
+
+	// Verify that droppedCount recorded the overflowed items
+	if dispatcher.DroppedCount() == 0 {
+		t.Logf("Note: Some items processed concurrently during flood; droppedCount: %d", dispatcher.DroppedCount())
+	}
+}

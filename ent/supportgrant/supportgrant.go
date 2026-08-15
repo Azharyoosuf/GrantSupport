@@ -68,6 +68,8 @@ var (
 	DefaultIsUsed bool
 	// DefaultScope holds the default value on creation for the "scope" field.
 	DefaultScope string
+	// DefaultWhitelistedIps holds the default value on creation for the "whitelisted_ips" field.
+	DefaultWhitelistedIps []string
 	// DefaultCreatedAt holds the default value on creation for the "created_at" field.
 	DefaultCreatedAt func() time.Time
 	// DefaultID holds the default value on creation for the "id" field.

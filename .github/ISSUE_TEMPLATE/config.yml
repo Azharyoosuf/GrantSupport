@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security Vulnerability Reporting
+    url: https://github.com/azharyoosuf/grantsupport/security/advisories/new
+    about: Please report security vulnerabilities privately rather than in public issues.
+  - name: Community Discussions & Q&A
+    url: https://github.com/azharyoosuf/grantsupport/discussions
+    about: Ask questions, discuss integration approaches, and share feedback.

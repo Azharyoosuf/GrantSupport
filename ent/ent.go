@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"grantsupport/ent/accessrequest"
 	"grantsupport/ent/auditevent"
 	"grantsupport/ent/supportgrant"
 	"reflect"
@@ -74,8 +75,9 @@ var (
 func checkColumn(table, column string) error {
 	initCheck.Do(func() {
 		columnCheck = sql.NewColumnCheck(map[string]func(string) bool{
-			auditevent.Table:   auditevent.ValidColumn,
-			supportgrant.Table: supportgrant.ValidColumn,
+			accessrequest.Table: accessrequest.ValidColumn,
+			auditevent.Table:    auditevent.ValidColumn,
+			supportgrant.Table:  supportgrant.ValidColumn,
 		})
 	})
 	return columnCheck(table, column)

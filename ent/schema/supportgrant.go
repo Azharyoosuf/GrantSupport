@@ -33,8 +33,11 @@ func (SupportGrant) Fields() []ent.Field {
 		field.Time("expires_at"),
 		field.Bool("is_used").Default(false),
 		field.Time("used_at").Optional().Nillable(),
+		// Scope is passed through to the issued JWT's claims but is NOT enforced by GrantSupport itself —
+		// the host application consuming the JWT is responsible for checking this claim before permitting
+		// any action. This is intentional; do not assume GrantSupport restricts behavior based on scope.
 		field.String("scope").Default("FULL_ACCESS"),
-		field.JSON("whitelisted_ips", []string{}).Optional(),
+		field.JSON("whitelisted_ips", []string{}).Optional().Default([]string{}),
 		field.Time("created_at").Default(time.Now),
 	}
 }

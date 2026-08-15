@@ -1,31 +1,34 @@
-# Technical Architecture & Security Specification
+# Technical Architecture Specification
 
-This document details the architectural design, cryptographic primitives, threat model, database portability, and audit verification guarantees of **GrantSupport**.
+This document details the architectural design, component layers, cryptographic primitives, database portability, adapter patterns, and operational trade-offs of **GrantSupport**.
 
 ---
 
-## 1. System Architecture: Standalone vs. Embedded Engine
+## 1. System Overview
 
-GrantSupport is architectured to operate in two distinct modes without architectural compromise:
+GrantSupport operates in two primary deployment topologies:
 
 ```
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                                 STANDALONE MICROSERVICE                                │
+│                                 STANDALONE HTTP SERVER                                 │
 │                                                                                        │
-│   HTTP Client (Python, Node, Java, Go, C#, Rust) ──► Chi Router (:8085)                │
-│                                                            │                           │
-│                                                            ▼                           │
-│                                                SupportGrantController                  │
-│                                                            │                           │
-│                                                            ▼                           │
-│                                                   GrantSupportService                  │
-│                                                      │             │                   │
-│                              ┌───────────────────────┘             └─────────┐         │
-│                              ▼                                               ▼         │
-│                    SupportGrantRepository                         SecurityAuditRepo   │
-│                              │                                               │         │
-│                              ▼                                               ▼         │
-│                     Ent ORM / Database Pool (PostgreSQL, MySQL, MariaDB, SQLite)       │
+│   HTTP Client (Any Language) ──► Go Chi HTTP Router (:8080)                            │
+│                                           │                                            │
+│                                           ▼                                            │
+│                                 SupportGrantController                                 │
+│                                           │                                            │
+│                                           ▼                                            │
+│                                  GrantSupportService                                   │
+│                                     │             │                                    │
+│                    ┌────────────────┘             └───────────────┐                    │
+│                    ▼                                              ▼                    │
+│          SupportGrantRepository                        SecurityAuditRepository         │
+│                    │                                              │                    │
+│                    ▼                                              ▼                    │
+│     Database Layer (PostgreSQL / MySQL / MariaDB / SQLite via Ent ORM & pgx)           │
+│                    │                                                                   │
+│                    ▼                                                                   │
+│     Coordination Adapters (Valkey / Redis / SQL / Memory Stores)                       │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
@@ -35,164 +38,180 @@ GrantSupport is architectured to operate in two distinct modes without architect
 │                                  │                                                     │
 │        ┌─────────────────────────┴─────────────────────────┐                           │
 │        ▼                                                   ▼                           │
-│   Direct Go Engine API (In-Process)              engine.HTTPHandler()                  │
-│   engine.CreateSupportGrant(...)                 Mounted under host router /api/v1/... │
-│   engine.SupportLogin(...)                                                             │
-│   engine.VerifyAuditChain(...)                                                         │
+│   Direct Go Methods (In-Process)                 engine.HTTPHandler()                  │
+│   - engine.CreateSupportGrant(...)               - Mounts endpoints on host HTTP mux   │
+│   - engine.SupportLogin(...)                                                           │
+│   - engine.RevokeSupportGrant(...)                                                     │
+│   - engine.VerifyAuditChain(...)                                                       │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Strategic Architectural Principles:
-1. **Zero External Dependencies Required**: Operates with a single SQL database:
-   - **PostgreSQL**: Reference and primary production database.
-   - **MySQL (8.0+) & MariaDB (10.5+)**: Supported enterprise relational database alternatives.
-   - **SQLite**: Supported for single-process embedded applications, local development, and test suites (not distributed across multi-container replicas).
-2. **Valkey & Redis Officially Supported**: Distributed caching and locking officially support **Valkey** and **Redis** (other Redis-protocol-compatible implementations may work but are not officially verified or supported). System operates fully without Redis/Valkey by falling back to SQL database tables or in-memory stores.
-3. **Zero Connection Leakage**: Reuses caller-managed `*sql.DB`, `*ent.Client`, or `*pgxpool.Pool` connection pools without creating secondary pools.
-4. **Zero Telemetry / Zero Phone-Home**: Contains no license servers, no heartbeat pings, no seat enforcement counters, and no remote telemetry.
-5. **Tenant Isolation by Construction**: Every repository query enforces strict `institution_id` scoping.
+---
+
+## 2. Component Layer Responsibilities
+
+### 2.1 Presentation Layer (`pkg/controller/`)
+* **Thin Controller Model**: Handlers decode JSON payloads, validate DTO constraints (`go-playground/validator/v10`), invoke domain services, and return responses.
+* **RFC 9457 Problem Details**: All errors and validation failures are serialized into standard `application/problem+json` format with correlation IDs.
+* **Panic & Error Sanitization**: The `CatchAsync` higher-order wrapper intercepts unhandled panics and errors, logging details server-side via `slog.Error` while returning sanitized messages to clients to prevent internal driver or schema disclosure.
+
+### 2.2 Domain & Service Layer (`pkg/service/`)
+* **`GrantSupportService`**: Orchestrates token creation, atomic claim validation, duration bounds, IP restriction matching, and audit event dispatching.
+* **Token Version Invalidation**: Coordinates session revoking by incrementing token version counters in the configured `RevocationStore`.
+* **Asynchronous Webhook Triggering**: Emits signed webhook events via bounded background worker pools.
+
+### 2.3 Data Access Layer (`pkg/repository/`)
+* **`SupportGrantRepository`**: Typed CRUD operations over `gs_support_grants` table with strict multi-tenant `institution_id` filtering.
+* **`SecurityAuditRepository`**: Chained append-only audit event logging to `gs_audit_events` with SHA-256 hash chaining and transaction management.
+* **Database Drivers**: Reference support for PostgreSQL 16+ via `jackc/pgx/v5`, MySQL 8.4+ and MariaDB 11.4+ via standard Go relational drivers, and SQLite 3 via pure Go `modernc.org/sqlite`.
+
+### 2.4 Capability Adapters (`pkg/adapters/`)
+Implements capability interfaces defined in `pkg/ports/`:
+* **`LockStore`**: `RedisLockStore` (Redlock atomic `SETNX` + Lua release) and `SQLLockStore` (database-level transactional/advisory locking).
+* **`RevocationStore`**: `RedisRevocationStore` (Valkey key-value version cache) and `SQLRevocationStore` (table-backed version query).
+* **`RateLimiterStore`**: `RedisRateLimiter` (atomic Lua token bucket per client IP) and `MemoryRateLimiter` (in-memory sliding window).
 
 ---
 
-## 2. Delegation Token Lifecycle & Security Control Flow
-
-GrantSupport implements **Delegated Support Access with Single-Use Ephemeral Tokens**:
+## 3. Delegation Token & Session Lifecycle
 
 ```
-[Customer Admin] ──1. POST /api/v1/auth/support/grant (duration: 60m, scope: BILLING_ONLY)──► [GrantSupport]
-                                                                                                  │
-                                                                                    2. crypto/rand 32 bytes
-                                                                                    3. rawToken = {instID}_{rand}
-                                                                                    4. Store SHA-256(rawToken)
-                                                                                    5. Log SUPPORT_ACCESS_GRANTED
-                                                                                    6. Dispatch webhook (grant.created)
-                                                                                                  │
-[Support Agent] ◄──7. Returns rawToken (only returned once, never persisted)─────────────────────┘
+[Customer Admin]                                             GrantSupport                                             [Support Agent]
+       │                                                           │                                                         │
+       │── 1. POST /grant (duration: 60m, scope, IPs) ────────────►│                                                         │
+       │                                                           ├── 2. Generate 256-bit crypto/rand token                 │
+       │                                                           ├── 3. Hash token: SHA-256(rawToken)                      │
+       │                                                           ├── 4. Insert grant record (is_used=false)                │
+       │                                                           ├── 5. Append SUPPORT_ACCESS_GRANTED audit event          │
+       │                                                           └── 6. Dispatch async webhook 'grant.created'             │
+       │◄── 7. Return raw token (once; never stored) ──────────────┤                                                         │
+       │                                                           │                                                         │
+       │ [Secure Out-of-Band Delivery to Agent]                    │                                                         │
+       │                                                           │                                                         │
+       │                                                           │◄── 8. POST /login (token, agentId) ─────────────────────│
+       │                                                           ├── 9. Verify client IP against whitelist                 │
+       │                                                           ├── 10. Query grant by SHA-256(token)                     │
+       │                                                           ├── 11. Atomic CAS UPDATE (is_used=true WHERE is_used=f)  │
+       │                                                           ├── 12. Issue RS256 JWT (exp = grant.ExpiresAt)           │
+       │                                                           ├── 13. Append SUPPORT_ACCESS_LOGGED_IN audit event       │
+       │                                                           └── 14. Dispatch async webhook 'grant.claimed'            │
+       │                                                           │─── 15. Return RS256 Access Token ──────────────────────►│
+       │                                                           │                                                         │
+       │                                                           │◄── 16. POST /logout (voluntary) ────────────────────────│
+       │                                                           ├── 17. Increment agent token version in RevocationStore  │
+       │                                                           └── 18. Return 200 OK ───────────────────────────────────►│
+       │                                                           │                                                         │
+       │── 19. POST /revoke (admin force revoke) ─────────────────►│                                                         │
+       │                                                           ├── 20. Expire all pending unredeemed grants in DB        │
+       │                                                           ├── 21. Bump agent token versions in RevocationStore      │
+       │                                                           ├── 22. Append SUPPORT_ACCESS_REVOKED audit event         │
+       │                                                           └── 23. Dispatch async webhook 'grant.revoked'            │
+       │◄── 24. Return 200 OK ─────────────────────────────────────┤                                                         │
+```
+
+---
+
+## 4. Authentication Mechanisms
+
+### 4.1 Default: RS256 JWT Bearer Authentication
+Standard for the HTTP API:
+* **Asymmetric RS256 Signing**: Tokens are signed using a private RSA key (`JWT_PRIVATE_KEY`) and verified using the corresponding public key (`JWT_PUBLIC_KEY`).
+* **Active Revocation Verification**: The `NewAuthMiddleware` extracts `token_version`, `institution_id`, and `user_id` from JWT claims and queries the `RevocationStore`. If the current version in the store exceeds the JWT's version, the request is rejected with HTTP 401 `TOKEN_REVOKED`.
+---
+
+### 3.2 Just-In-Time (JIT) Access Request & Customer Approval Lifecycle
+
+GrantSupport provides an optional, in-band request and approval state machine:
+
+```
+[Support Agent]                                                GrantSupport                                              [Customer Admin]
+       │                                                             │                                                          │
+       │── 1. POST /access-requests (reason, duration, scope) ──────►│                                                          │
+       │                                                             ├── 2. Persist in gs_access_requests (status='PENDING')    │
+       │                                                             ├── 3. Append 'access_request.created' audit event         │
+       │                                                             └── 4. Dispatch async webhook 'access_request.created'     │
+       │◄── 5. Return Created AccessRequest (201 Created) ───────────┤                                                          │
+       │                                                             │                                                          │
+       │                                                             │◄── 6. GET /access-requests (views pending requests) ─────│
+       │                                                             │                                                          │
+       │                                                             │◄── 7. POST /access-requests/{id}/approve ────────────────│
+       │                                                             │    (Check: approver_id != requester_id)                  │
+       │                                                             │    (BEGIN DB TRANSACTION)                                │
+       │                                                             │    ├── Atomic CAS: status='APPROVED', expires_at > now   │
+       │                                                             │    ├── Insert SupportGrant record (SHA-256 token hash)   │
+       │                                                             │    └── Append 'access_request.approved' audit event      │
+       │                                                             │    (COMMIT DB TRANSACTION)                               │
+       │                                                             │    └── Dispatch async webhook 'access_request.approved'  │
+       │                                                             │─── 8. Return rawToken once in HTTP response ────────────►│
+       │                                                             │       (Admin shares rawToken via secure channel)         │
+       │                                                             │                                                          │
+       │◄── 9. Agent receives token out-of-band / via ticket ────────┴──────────────────────────────────────────────────────────┘
        │
-       ├──8. POST /api/v1/auth/support/login (rawToken, agentId)───────────────────► [GrantSupport]
-                                                                                                  │
-                                                                                    9. Verify SHA-256(rawToken)
-                                                                                    10. Check ExpiresAt > NOW()
-                                                                                    11. Atomic CAS UPDATE (is_used=true, used_by_id=agentID)
-                                                                                    12. Issue RS256 JWT (ExpiresAt = Grant.ExpiresAt)
-                                                                                    13. Log SUPPORT_ACCESS_LOGGED_IN
-                                                                                    14. Dispatch webhook (grant.claimed)
-                                                                                                  │
-[Support Agent] ◄──15. Returns RS256 JWT (scoped to InstitutionID, Duration & Role: SUPPORT_AGENT)─┘
+       │── 10. POST /auth/support/login (token, agentId) ───────────► [Same single-use redemption and JWT issuance]
 ```
 
-### Security Guarantees:
-* **High Entropy**: 256 bits of cryptographic entropy (`crypto/rand`) per token.
-* **Hashed at Rest**: Only the SHA-256 hash of the token is stored in the database. Raw tokens are never persisted.
-* **Atomic Single-Use Consumption**: Token redemption uses an atomic conditional predicate:
-  ```sql
-  UPDATE gs_support_grants
-  SET is_used = true, used_by_id = ?, used_at = CURRENT_TIMESTAMP
-  WHERE id = ? AND is_used = false;
-  ```
-  If concurrent requests attempt to claim the same grant token, exactly one succeeds and all other requests fail (`ErrGrantAlreadyUsed`).
-* **Time-Bound Expiration & Dynamic Session Lifetime**: Grants carry strict TTLs (1 to 1440 minutes). The issued `SUPPORT_AGENT` JWT is dynamically bound to the exact grant expiration timestamp (`session expiration <= grant expiration`).
-* **Dual Grant and Active Session Revocation**:
-  - `POST /api/v1/auth/support/revoke` immediately invalidates all **unredeemed support grants** for the tenant AND revokes all currently active `SUPPORT_AGENT` JWT sessions by incrementing the tenant's agent token version in the `RevocationStore`.
-  - `POST /api/v1/auth/support/logout` allows a support agent to invalidate their active JWT session immediately upon completing maintenance.
+---
+
+## 4. Authentication, Session Revocation & Key Security
+
+### 4.1 Inbound JWT Bearer Authentication (Standard REST API)
+* **Bearer Validation**: Validates RS256 signatures against public keys in `KeyManager` with `kid` tracking.
+* **Revocation Check**: Queries `RevocationStore.IsTokenRevoked(instID, userID, tokenVersion)` on every request.
+* **Fail-Closed Guard**: If the `RevocationStore` is nil or unreachable, the middleware rejects requests with HTTP 503 `REVOCATION_CHECK_UNAVAILABLE`.
+
+### 4.2 Opt-In: BulletproofAuth (5-Layer Ed25519 Request Signing)
+Available via `engine.BulletproofMiddleware(keyStore)` for Go embedders securing machine-to-machine integrations:
+1. **Layer 1**: Ed25519 asymmetric cryptographic signature over canonical request payload (`Method\nPath\nNonce\nExpiresAt\nBody`).
+2. **Layer 2**: Client-specified payload expiration (TTL <= 900s) with 30s clock skew window.
+3. **Layer 3**: Nonce replay attack protection via atomic cache store.
+4. **Layer 4**: Socket-level TCP / trusted proxy client IP binding.
+5. **Layer 5**: Multi-tenant context injection into request context.
 
 ---
 
-## 3. Cryptographically Chained, Tamper-Evident Audit Ledger
+## 5. Audit Trail Integrity & Hash Chaining
 
-Every support access lifecycle event is recorded in a cryptographically linked, append-only audit ledger:
-
-### 3.1 SHA-256 Hash Chaining Formula
-For every `AuditEvent` entry $E_n$:
-$$\text{Hash}_n = \text{SHA256}(\text{Hash}_{n-1} \parallel \text{InstitutionID} \parallel \text{ActorID} \parallel \text{EventType} \parallel \text{SanitizedDescription} \parallel \text{TimestampNanos})$$
+The `gs_audit_events` table maintains a chronological cryptographic ledger:
 
 ```
-[Genesis Hash: 0000000000000000000000000000000000000000000000000000000000000000]
-                                   │
-                                   ▼
-[Event 1: SUPPORT_ACCESS_GRANTED] ──► Hash_1 = SHA256(Genesis || InstID || AdminID || ...)
-                                   │
-                                   ▼
-[Event 2: SUPPORT_ACCESS_LOGGED_IN] ─► Hash_2 = SHA256(Hash_1 || InstID || AgentID || ...)
-                                   │
-                                   ▼
-[Event 3: SUPPORT_ACCESS_REVOKED] ──► Hash_3 = SHA256(Hash_2 || InstID || AdminID || ...)
+Event #1 ──► Hash_1 = SHA-256(Event_1_Data)
+                │
+Event #2 ──► Hash_2 = SHA-256(Hash_1 + Event_2_Data)
+                │
+Event #3 ──► Hash_3 = SHA-256(Hash_2 + Event_3_Data)
 ```
 
-### 3.2 Audit Serialization & Tamper Detection
-* **Per-Institution In-Process Mutex Striping**: Serializes concurrent audit writes within a process to eliminate hash-chain forks without creating cross-tenant lock contention.
-* **Distributed Cross-Process Locking**: Attaches SQL or Redis distributed locks when running across multiple container replicas.
-* **Tamper Verification**: `VerifyAuditChain(ctx, institutionID)` re-computes every cryptographic hash link from genesis to tail. If any record was modified, deleted, or inserted out of sequence, verification fails and identifies the exact event ID of the violation.
+* **Sequential Binding**: Each event record stores `previous_hash` and `hash_chain`.
+* **Tamper Verification**: `engine.VerifyAuditChain(ctx, institutionID)` recalculates all hashes chronologically. If any record was altered, deleted, or inserted out of order, verification fails.
+* **Concurrency Protection**: Per-tenant mutex striping ensures concurrent operations within the same tenant do not interleave hash calculations.
 
 ---
 
-## 4. Automated PII & Credential Sanitization
+## 6. Known Architectural Trade-offs & Limitations
 
-Before writing to the audit ledger, all textual descriptions and event metadata maps pass through `security.SanitizeAuditText()` and `security.SanitizeAuditMap()`. The sanitizer automatically redacts:
-* **Bearer Tokens & Passwords**: `bearer eyJ...` ➔ `Bearer [REDACTED_TOKEN]`
-* **Credit Cards (PAN)**: 13–19 digit sequences ➔ `[REDACTED_CARD]`
-* **Email Addresses**: RFC 5322 matching patterns ➔ `[REDACTED_EMAIL]`
-* **Phone Numbers**: E.164 and international formats ➔ `[REDACTED_PHONE]`
+### 6.1 Absence of CORS (By Design)
+GrantSupport does not include Cross-Origin Resource Sharing (CORS) middleware. The intended architectural pattern is:
 
----
+```
+Browser Client (Admin Dashboard)
+       │
+       ▼
+Host Application Backend (Proxy / BFF)
+       │
+       ▼
+GrantSupport API (Internal Network / VPC)
+```
+Direct browser calls to GrantSupport are discouraged to avoid exposing administrative credential delegation endpoints to cross-origin web scripts.
 
-## 5. Capability Stores & Failure Policies
+### 6.2 Fail-Closed Valkey Availability Dependency
+* **Startup**: If Valkey is omitted from configuration, the server gracefully initializes SQL-backed and in-memory fallback stores.
+* **Mid-Operation**: If Valkey is configured and subsequently becomes unreachable during active operation, security-critical paths (rate limiting on `/login` and revocation checks) **fail closed** with HTTP 503. The system intentionally does not silently downgrade to in-memory stores during a request to prevent distributed rate limit bypasses.
 
-GrantSupport provides pluggable capability adapters with explicit failure modes:
+### 6.3 Scope Enforcement Boundary
+The `scope` parameter (e.g. `BILLING_ONLY`, `READ_ONLY`, `FULL_ACCESS`) is passed through and embedded as a claim in the issued JWT. GrantSupport **does not interpret or enforce application domain permissions**. The host application must inspect the JWT `scope` claim to restrict access.
 
-| Capability | Valkey/Redis Adapter | SQL Adapter | In-Memory Fallback | Failure Policy |
-| :--- | :--- | :--- | :--- | :--- |
-| **Distributed Lock** | `RedisLockStore` (SETNX + Lua) | `SQLLockStore` (`gs_locks`) | `MemoryLockStore` (Mutex) | Rejects on timeout / contention |
-| **Replay Prevention** | `RedisReplayStore` (EXPIRE) | `SQLReplayStore` (`gs_replays`) | `MemoryReplayStore` (TTL Map) | **Fail-closed** (Rejects replay) |
-| **Token Revocation** | `RedisRevocationStore` (Version) | `SQLRevocationStore` (`gs_revocations`) | — | **Fail-closed** (503 on store error) |
-| **Rate Limiter** | `RedisRateLimiter` (INCR) | — | `MemoryRateLimiter` (Token Bucket) | **Fail-closed** (503 on store error) |
+### 6.4 Asynchronous Webhook Delivery
+Outbound HTTP webhooks are dispatched asynchronously using bounded goroutine workers. Network timeouts or failures at the webhook receiver are logged as warnings and do not abort or roll back database grant transactions.
 
----
-
-## 6. Optional Encryption & Key Management
-
-* **Local Encryption**: HKDF-derived per-tenant keys using SHA-256 master key + AES-256-GCM authenticated encryption.
-* **AWS KMS Envelope Encryption**: Optional AWS KMS provider using `GenerateDataKey` with tenant-scoped encryption contexts (`institutionId`).
-* *Scope*: Encryption infrastructure is provided as a utility for application-level data protection; it is not automatically applied to every database field.
-
----
-
-## 7. Threat Model & Countermeasures
-
-| Threat Vector | Attack Scenario | Countermeasure |
-| :--- | :--- | :--- |
-| **Token Replay Attack** | Attacker intercepts a raw support grant token. | Single-use atomic CAS consumption flag (`is_used = true`) + bounded TTL (max 24h) + SHA-256 storage. |
-| **Cross-Tenant Access** | Tenant A attempts to claim or revoke Tenant B's grant. | Strict `institution_id` query scoping + token prefix defense-in-depth verification. |
-| **Algorithm Confusion** | Attacker presents an HMAC-signed token to RS256 verifier. | Explicit `SigningMethodRSA` type assertion check in `VerifyJWT()`. |
-| **Brute-Force Login** | Attacker attempts random token guessing on `/login`. | IP-based rate limiting (10 req/min/IP) with socket IP extraction and trusted proxy validation. |
-| **Audit Ledger Tampering** | Malicious DB operator modifies or deletes access logs. | SHA-256 cryptographic hash-chaining detected by `VerifyAuditChain()`. |
-| **Store Failure Bypass** | Redis or SQL store crashes during auth or rate limit check. | **Fail-closed** architecture: returns 503 / 401 rather than allowing unauthenticated or unthrottled access. |
-
----
-
-## 8. HTTPS, TLS 1.2/1.3 & Transport Security
-
-GrantSupport supports two production deployment architectures for transport security:
-
-### 8.1 Deployment Models
-1. **Native TLS Termination**:
-   - GrantSupport directly binds to `HTTPS_PORT` (default `8443` or `443`) using standard Go `crypto/tls`.
-   - Certificate and private key paths are configured via `TLS_CERT_FILE` and `TLS_KEY_FILE`.
-   - If certificate/key files are missing, unreadable, expired, or mismatched, server **fails startup immediately** without insecure fallback.
-   - Optional HTTP-to-HTTPS redirect listener runs on `PORT` with HTTP 308 permanent redirect.
-2. **Reverse Proxy / Load Balancer Termination**:
-   - Upstream reverse proxy (ALB / Cloudflare) terminates TLS and forwards requests to GrantSupport over internal HTTP `PORT`.
-   - Client IP and protocol extraction uses a strict `TRUSTED_PROXIES` CIDR whitelist. Untrusted forwarded headers are ignored.
-
-### 8.2 TLS Policy & Cryptographic Defaults
-* **Minimum TLS Version**: `tls.VersionTLS12` (TLS 1.0 and TLS 1.1 are rejected).
-* **TLS 1.3**: Enabled and negotiated by default with maintained runtime post-quantum hybrid key exchange.
-* **Modern Cipher Suites (TLS 1.2)**: ECDHE-ECDSA/RSA with AES-GCM and ChaCha20-Poly1305. All CBC, 3DES, RC4, and static RSA key-exchange ciphers are disabled.
-* **HTTP/2**: Supported automatically via ALPN (`h2`, `http/1.1`).
-* **Security Headers**: Injects `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: DENY`, and `Strict-Transport-Security` (`max-age=31536000`) on HTTPS connections.
-* **Resource Exhaustion Protection**:
-  - `ReadHeaderTimeout`: 5 seconds
-  - `ReadTimeout`: 15 seconds
-  - `WriteTimeout`: 15 seconds
-  - `IdleTimeout`: 60 seconds
-  - `MaxHeaderBytes`: 1 MB (1 << 20)
+### 6.5 Token Delivery Channel Limitation
+Approval controls whether access may be granted. GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel. GrantSupport deliberately does not include email, SMS, Slack, or ticketing infrastructure.

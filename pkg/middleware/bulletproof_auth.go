@@ -8,10 +8,8 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,31 +52,7 @@ func GetRealClientIP(r *http.Request) string {
 
 // ValidateIPWhitelist verifies if a client IP matches a list of whitelisted IPs or CIDR subnets.
 func ValidateIPWhitelist(clientIP string, whitelistedIPs []string) bool {
-	if len(whitelistedIPs) == 0 {
-		return true // No restriction
-	}
-
-	parsedClientIP := net.ParseIP(clientIP)
-	if parsedClientIP == nil {
-		return false
-	}
-
-	for _, entry := range whitelistedIPs {
-		entry = strings.TrimSpace(entry)
-		// Check exact match
-		if entry == clientIP {
-			return true
-		}
-		// Check CIDR range match (e.g. 192.168.1.0/24)
-		if strings.Contains(entry, "/") {
-			_, subnet, err := net.ParseCIDR(entry)
-			if err == nil && subnet.Contains(parsedClientIP) {
-				return true
-			}
-		}
-	}
-
-	return false
+	return security.ValidateIPWhitelist(clientIP, whitelistedIPs)
 }
 
 // BulletproofAuthMiddleware returns a 5-Layer Security HTTP middleware handler.

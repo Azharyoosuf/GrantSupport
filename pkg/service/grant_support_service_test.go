@@ -2,14 +2,19 @@ package service_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
 	"grantsupport/pkg/adapters/lock"
+	"grantsupport/pkg/domain"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
@@ -292,10 +297,10 @@ func TestScopedSupportGrantAndJWT(t *testing.T) {
 		t.Fatalf("CreateSupportGrantScoped failed: %v", err)
 	}
 
-	// Login and inspect JWT claims
-	_, jwtToken, err := svc.SupportLogin(ctx, rawToken, agentID)
+	// Login with matching whitelisted IP and inspect JWT claims
+	_, jwtToken, err := svc.SupportLogin(ctx, rawToken, agentID, "192.168.1.100")
 	if err != nil {
-		t.Fatalf("SupportLogin failed: %v", err)
+		t.Fatalf("SupportLogin failed with valid IP: %v", err)
 	}
 
 	claims, err := security.VerifyJWT(jwtToken)
@@ -305,5 +310,142 @@ func TestScopedSupportGrantAndJWT(t *testing.T) {
 
 	if claims.Scope != "BILLING_ONLY" {
 		t.Fatalf("Expected claims.Scope = BILLING_ONLY, got: %s", claims.Scope)
+	}
+}
+
+func TestSupportLoginIPWhitelistEnforcement(t *testing.T) {
+	ctx := context.Background()
+	_ = security.SetupTestRSAKeys()
+
+	db, err := sql.Open("sqlite", "file:grantsupport_ip_test?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1")
+	if err != nil {
+		t.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer db.Close()
+
+	baseRepo := repository.NewBaseRepositoryWithDB(db, "sqlite")
+	if err := baseRepo.MasterClient.Schema.Create(ctx); err != nil {
+		t.Fatalf("Failed to auto-migrate SQLite schema: %v", err)
+	}
+
+	supportGrantRepo := repository.NewSupportGrantRepository(baseRepo)
+	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
+	lockStore := lock.NewMemoryLockStore()
+	svc := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
+
+	instID := uuid.New()
+	adminID := uuid.New()
+	agentID := uuid.New()
+
+	// 1. Create grant with CIDR subnet restriction
+	rawToken, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", []string{"192.168.1.0/24", "10.10.0.50"})
+	if err != nil {
+		t.Fatalf("CreateSupportGrantScoped failed: %v", err)
+	}
+
+	// 2. Login from unlisted IP must FAIL with ErrSupportGrantInvalid
+	_, _, err = svc.SupportLogin(ctx, rawToken, agentID, "172.16.0.99")
+	if err == nil {
+		t.Fatal("Expected SupportLogin to fail for non-whitelisted client IP")
+	}
+
+	// 3. Login with empty client IP must FAIL
+	_, _, err = svc.SupportLogin(ctx, rawToken, agentID, "")
+	if err == nil {
+		t.Fatal("Expected SupportLogin to fail for empty client IP when whitelist is configured")
+	}
+
+	// 4. Login from allowed CIDR subnet (192.168.1.42) must SUCCEED
+	_, jwtToken, err := svc.SupportLogin(ctx, rawToken, agentID, "192.168.1.42")
+	if err != nil {
+		t.Fatalf("Expected SupportLogin to succeed from whitelisted CIDR subnet: %v", err)
+	}
+	if jwtToken == "" {
+		t.Fatal("Expected valid JWT token from successful login")
+	}
+
+	// 5. Verify audit event was logged for the rejected IP
+	events, err := auditRepo.GetAuditEventsByInstitution(ctx, instID, 10, 0)
+	if err != nil {
+		t.Fatalf("Failed to query audit events: %v", err)
+	}
+
+	foundRejected := false
+	for _, ev := range events {
+		if ev.EventType == "SUPPORT_LOGIN_IP_REJECTED" {
+			foundRejected = true
+			break
+		}
+	}
+	if !foundRejected {
+		t.Error("Expected SUPPORT_LOGIN_IP_REJECTED audit event in audit log")
+	}
+}
+
+func TestSupportLoginInstitutionMismatch(t *testing.T) {
+	ctx := context.Background()
+	_ = security.SetupTestRSAKeys()
+
+	db, err := sql.Open("sqlite", "file:grantsupport_inst_mismatch_test?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1")
+	if err != nil {
+		t.Fatalf("Failed to open SQLite database: %v", err)
+	}
+	defer db.Close()
+
+	baseRepo := repository.NewBaseRepositoryWithDB(db, "sqlite")
+	if err := baseRepo.MasterClient.Schema.Create(ctx); err != nil {
+		t.Fatalf("Failed to auto-migrate SQLite schema: %v", err)
+	}
+
+	supportGrantRepo := repository.NewSupportGrantRepository(baseRepo)
+	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
+	lockStore := lock.NewMemoryLockStore()
+	svc := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
+
+	instA := uuid.New()
+	instB := uuid.New()
+	adminID := uuid.New()
+	agentID := uuid.New()
+
+	// 1. Craft a token claiming to belong to instB
+	tokenBytes := []byte("01234567890123456789012345678901")
+	tamperedToken := fmt.Sprintf("%s_%s", instB.String(), hex.EncodeToString(tokenBytes))
+	h := sha256.Sum256([]byte(tamperedToken))
+	tokenHash := hex.EncodeToString(h[:])
+
+	// 2. Insert grant record assigned to instA with the hash of the tampered token
+	grantInput := &domain.CreateSupportGrantInput{
+		InstitutionID: instA,
+		GrantedByID:   adminID,
+		TokenHash:     tokenHash,
+		ExpiresAt:     time.Now().Add(60 * time.Minute),
+		Scope:         "FULL_ACCESS",
+	}
+	_, err = supportGrantRepo.CreateSupportGrant(ctx, grantInput)
+	if err != nil {
+		t.Fatalf("CreateSupportGrant failed: %v", err)
+	}
+
+	// 3. SupportLogin with tampered token must FAIL with ErrSupportGrantInvalid
+	_, _, err = svc.SupportLogin(ctx, tamperedToken, agentID)
+	if err != service.ErrSupportGrantInvalid {
+		t.Fatalf("Expected ErrSupportGrantInvalid on institution mismatch, got: %v", err)
+	}
+
+	// 4. Verify audit event SUPPORT_LOGIN_INSTITUTION_MISMATCH was logged for instA
+	events, err := auditRepo.GetAuditEventsByInstitution(ctx, instA, 10, 0)
+	if err != nil {
+		t.Fatalf("Failed to query audit events: %v", err)
+	}
+
+	foundMismatchEvent := false
+	for _, ev := range events {
+		if ev.EventType == "SUPPORT_LOGIN_INSTITUTION_MISMATCH" {
+			foundMismatchEvent = true
+			break
+		}
+	}
+	if !foundMismatchEvent {
+		t.Error("Expected SUPPORT_LOGIN_INSTITUTION_MISMATCH event in audit log for institution A")
 	}
 }

@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS gs_audit_events (
     event_type VARCHAR(128) NOT NULL,
     description TEXT NULL,
     hash_chain VARCHAR(64) NULL,
-    signature TEXT NULL,
     created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
     INDEX idx_gs_audit_events_inst_created (institution_id, created_at),
     INDEX idx_gs_audit_events_actor (actor_id),

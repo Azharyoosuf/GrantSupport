@@ -37,6 +37,8 @@ func (r *SupportGrantRepository) CreateSupportGrant(ctx context.Context, data *d
 	}
 	if len(data.WhitelistedIPs) > 0 {
 		builder.SetWhitelistedIps(data.WhitelistedIPs)
+	} else {
+		builder.SetWhitelistedIps([]string{})
 	}
 
 	grant, err := builder.Save(ctx)
@@ -66,6 +68,7 @@ func (r *SupportGrantRepository) FindActiveGrantByTokenHash(ctx context.Context,
 			supportgrant.FieldExpiresAt,
 			supportgrant.FieldIsUsed,
 			supportgrant.FieldScope,
+			supportgrant.FieldWhitelistedIps,
 			supportgrant.FieldCreatedAt,
 		).
 		Only(ctx)
@@ -155,4 +158,64 @@ func (r *SupportGrantRepository) RevokeAllGrantsForInstitution(ctx context.Conte
 	}
 
 	return agentIDs, nil
+}
+
+var ErrGrantNotFound = errors.New("GRANT_NOT_FOUND: Support grant not found or does not belong to this institution")
+
+// FindActiveSessionsByInstitution retrieves all currently active redeemed support grants for an institution.
+func (r *SupportGrantRepository) FindActiveSessionsByInstitution(ctx context.Context, institutionID uuid.UUID) ([]*ent.SupportGrant, error) {
+	client, err := r.GetClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	now := time.Now()
+	grants, err := client.SupportGrant.Query().
+		Where(
+			supportgrant.InstitutionID(institutionID),
+			supportgrant.IsUsed(true),
+			supportgrant.UsedByIDNotNil(),
+			supportgrant.ExpiresAtGT(now),
+		).
+		Order(ent.Desc(supportgrant.FieldUsedAt)).
+		All(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query active sessions: %w", err)
+	}
+	return grants, nil
+}
+
+// RevokeSessionByID marks a specific active support grant as expired (expires_at = now) scoped strictly to institutionID.
+func (r *SupportGrantRepository) RevokeSessionByID(ctx context.Context, institutionID, grantID uuid.UUID) (*ent.SupportGrant, error) {
+	client, err := r.GetClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// First verify the grant exists and belongs to the specified institution
+	grant, err := client.SupportGrant.Query().
+		Where(
+			supportgrant.ID(grantID),
+			supportgrant.InstitutionID(institutionID),
+		).
+		Only(ctx)
+	if err != nil {
+		if ent.IsNotFound(err) {
+			return nil, ErrGrantNotFound
+		}
+		return nil, fmt.Errorf("failed to query grant for revocation: %w", err)
+	}
+
+	// Expire the grant immediately
+	now := time.Now()
+	_, err = client.SupportGrant.UpdateOneID(grantID).
+		Where(supportgrant.InstitutionID(institutionID)).
+		SetExpiresAt(now).
+		Save(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to expire grant: %w", err)
+	}
+
+	grant.ExpiresAt = now
+	return grant, nil
 }

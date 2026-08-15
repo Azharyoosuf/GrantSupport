@@ -62,7 +62,7 @@ func TestEmbeddedEngineLifecycle(t *testing.T) {
 	}
 
 	// 4. Test Direct Go API: SupportLogin
-	returnedInstID, jwtToken, err := engine.SupportLogin(ctx, rawToken, agentID)
+	returnedInstID, jwtToken, err := engine.SupportLogin(ctx, rawToken, agentID, "127.0.0.1")
 	if err != nil {
 		t.Fatalf("SupportLogin failed: %v", err)
 	}

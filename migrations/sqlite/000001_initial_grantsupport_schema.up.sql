@@ -23,7 +23,6 @@ CREATE TABLE IF NOT EXISTS gs_audit_events (
     event_type TEXT NOT NULL,
     description TEXT,
     hash_chain TEXT,
-    signature TEXT,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 

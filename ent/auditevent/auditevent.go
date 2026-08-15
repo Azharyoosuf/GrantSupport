@@ -24,8 +24,6 @@ const (
 	FieldDescription = "description"
 	// FieldHashChain holds the string denoting the hash_chain field in the database.
 	FieldHashChain = "hash_chain"
-	// FieldSignature holds the string denoting the signature field in the database.
-	FieldSignature = "signature"
 	// FieldCreatedAt holds the string denoting the created_at field in the database.
 	FieldCreatedAt = "created_at"
 	// Table holds the table name of the auditevent in the database.
@@ -40,7 +38,6 @@ var Columns = []string{
 	FieldEventType,
 	FieldDescription,
 	FieldHashChain,
-	FieldSignature,
 	FieldCreatedAt,
 }
 
@@ -92,11 +89,6 @@ func ByDescription(opts ...sql.OrderTermOption) OrderOption {
 // ByHashChain orders the results by the hash_chain field.
 func ByHashChain(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldHashChain, opts...).ToFunc()
-}
-
-// BySignature orders the results by the signature field.
-func BySignature(opts ...sql.OrderTermOption) OrderOption {
-	return sql.OrderByField(FieldSignature, opts...).ToFunc()
 }
 
 // ByCreatedAt orders the results by the created_at field.

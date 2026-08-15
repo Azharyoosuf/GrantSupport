@@ -9,9 +9,12 @@ import (
 
 // GrantSupportInput captures support delegation duration, scopes, and IP restrictions.
 type GrantSupportInput struct {
-	DurationMinutes int      `json:"durationMinutes" validate:"gte=1,lte=1440"`
-	Scope           string   `json:"scope,omitempty" validate:"omitempty,max=64"`
-	WhitelistedIPs  []string `json:"whitelistedIps,omitempty"`
+	DurationMinutes int `json:"durationMinutes" validate:"gte=1,lte=1440"`
+	// Scope is passed through to the issued JWT's claims but is NOT enforced by GrantSupport itself —
+	// the host application consuming the JWT is responsible for checking this claim before permitting
+	// any action. This is intentional; do not assume GrantSupport restricts behavior based on scope.
+	Scope          string   `json:"scope,omitempty" validate:"omitempty,max=64"`
+	WhitelistedIPs []string `json:"whitelistedIps,omitempty"`
 }
 
 // SupportLoginInput captures support token payload and explicit agent UUID.

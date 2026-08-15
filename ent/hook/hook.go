@@ -8,6 +8,18 @@ import (
 	"grantsupport/ent"
 )
 
+// The AccessRequestFunc type is an adapter to allow the use of ordinary
+// function as AccessRequest mutator.
+type AccessRequestFunc func(context.Context, *ent.AccessRequestMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f AccessRequestFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.AccessRequestMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.AccessRequestMutation", m)
+}
+
 // The AuditEventFunc type is an adapter to allow the use of ordinary
 // function as AuditEvent mutator.
 type AuditEventFunc func(context.Context, *ent.AuditEventMutation) (ent.Value, error)

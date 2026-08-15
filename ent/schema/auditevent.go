@@ -33,7 +33,6 @@ func (AuditEvent) Fields() []ent.Field {
 		field.String("event_type"),
 		field.String("description").Optional(),
 		field.String("hash_chain").Optional(),
-		field.String("signature").Optional(),
 		field.Time("created_at").
 			SchemaType(map[string]string{
 				dialect.MySQL:    "datetime(6)",

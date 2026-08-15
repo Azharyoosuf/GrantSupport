@@ -190,6 +190,11 @@ func (r *SecurityAuditRepository) VerifyAuditChain(ctx context.Context, institut
 
 // GetAuditEventsByInstitution retrieves paginated audit records for an institution.
 func (r *SecurityAuditRepository) GetAuditEventsByInstitution(ctx context.Context, institutionID uuid.UUID, limit, offset int) ([]*ent.AuditEvent, error) {
+	return r.GetAuditEventsFiltered(ctx, institutionID, nil, nil, limit, offset)
+}
+
+// GetAuditEventsFiltered retrieves paginated audit records for an institution with optional actor and event_type filters.
+func (r *SecurityAuditRepository) GetAuditEventsFiltered(ctx context.Context, institutionID uuid.UUID, actorID *uuid.UUID, eventType *string, limit, offset int) ([]*ent.AuditEvent, error) {
 	client, err := r.GetClient(ctx)
 	if err != nil {
 		return nil, err
@@ -201,9 +206,21 @@ func (r *SecurityAuditRepository) GetAuditEventsByInstitution(ctx context.Contex
 	if limit > 100 {
 		limit = 100
 	}
+	if offset < 0 {
+		offset = 0
+	}
 
-	return client.AuditEvent.Query().
-		Where(auditevent.InstitutionID(institutionID)).
+	query := client.AuditEvent.Query().
+		Where(auditevent.InstitutionID(institutionID))
+
+	if actorID != nil && *actorID != uuid.Nil {
+		query = query.Where(auditevent.ActorID(*actorID))
+	}
+	if eventType != nil && *eventType != "" {
+		query = query.Where(auditevent.EventType(*eventType))
+	}
+
+	return query.
 		Order(ent.Desc(auditevent.FieldCreatedAt), ent.Desc(auditevent.FieldID)).
 		Limit(limit).
 		Offset(offset).

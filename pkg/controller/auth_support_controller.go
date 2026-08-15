@@ -3,7 +3,11 @@ package controller
 import (
 	"net/http"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	"grantsupport/pkg/config"
 	pkgctx "grantsupport/pkg/context"
+	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
 )
 
@@ -30,7 +34,7 @@ func (c *SupportGrantController) GrantSupport(w http.ResponseWriter, r *http.Req
 	}
 	token, err := c.grantService.CreateSupportGrantScoped(r.Context(), tenant.InstitutionID, tenant.UserID, input.DurationMinutes, input.Scope, input.WhitelistedIPs)
 	if err != nil {
-		return NewAppError(http.StatusBadRequest, "GRANT_FAILED", err.Error())
+		return NewAppError(http.StatusBadRequest, "GRANT_FAILED", "Failed to generate support access grant")
 	}
 	WriteJSON(w, http.StatusCreated, map[string]any{"success": true, "message": "Support access token generated successfully.", "token": token})
 	return nil
@@ -47,9 +51,16 @@ func (c *SupportGrantController) SupportLogin(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-	instID, jwtToken, err := c.grantService.SupportLogin(r.Context(), input.Token, callerID)
+
+	var trustedProxies []string
+	if config.AppConfig != nil {
+		trustedProxies = config.AppConfig.TrustedProxies
+	}
+	clientIP := security.ExtractClientIP(r, trustedProxies)
+
+	instID, jwtToken, err := c.grantService.SupportLogin(r.Context(), input.Token, callerID, clientIP)
 	if err != nil {
-		return NewAppError(http.StatusUnauthorized, "SUPPORT_LOGIN_FAILED", err.Error())
+		return NewAppError(http.StatusUnauthorized, "SUPPORT_LOGIN_FAILED", "Invalid or expired support grant token")
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support agent authenticated successfully.", "institution_id": instID, "access_token": jwtToken, "accessToken": jwtToken, "data": map[string]any{"institution_id": instID, "access_token": jwtToken}})
 	return nil
@@ -63,7 +74,7 @@ func (c *SupportGrantController) RevokeSupport(w http.ResponseWriter, r *http.Re
 		return NewAppError(http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
 	}
 	if err := c.grantService.RevokeSupportGrant(r.Context(), tenant.InstitutionID, tenant.UserID); err != nil {
-		return NewAppError(http.StatusInternalServerError, "REVOKE_FAILED", err.Error())
+		return NewAppError(http.StatusInternalServerError, "REVOKE_FAILED", "Failed to revoke support delegations")
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "All support delegations revoked successfully."})
 	return nil
@@ -77,8 +88,42 @@ func (c *SupportGrantController) SupportLogout(w http.ResponseWriter, r *http.Re
 		return NewAppError(http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
 	}
 	if err := c.grantService.SupportLogout(r.Context(), tenant.InstitutionID, tenant.UserID); err != nil {
-		return NewAppError(http.StatusInternalServerError, "LOGOUT_FAILED", err.Error())
+		return NewAppError(http.StatusInternalServerError, "LOGOUT_FAILED", "Failed to log out support agent session")
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support agent session logged out successfully."})
+	return nil
+}
+
+// GetActiveSessions lists all active delegated support sessions for the tenant.
+// GET /api/v1/auth/support/sessions
+func (c *SupportGrantController) GetActiveSessions(w http.ResponseWriter, r *http.Request) error {
+	tenant, ok := pkgctx.GetTenant(r.Context())
+	if !ok || tenant == nil {
+		return NewAppError(http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
+	}
+	sessions, err := c.grantService.GetActiveSessions(r.Context(), tenant.InstitutionID)
+	if err != nil {
+		return NewAppError(http.StatusInternalServerError, "SESSIONS_FAILED", "Failed to retrieve active sessions")
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "sessions": sessions})
+	return nil
+}
+
+// TerminateSession revokes a specific support session by grant ID.
+// DELETE /api/v1/auth/support/sessions/{grantId}
+func (c *SupportGrantController) TerminateSession(w http.ResponseWriter, r *http.Request) error {
+	tenant, ok := pkgctx.GetTenant(r.Context())
+	if !ok || tenant == nil {
+		return NewAppError(http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
+	}
+	grantIDStr := chi.URLParam(r, "grantId")
+	grantID, err := uuid.Parse(grantIDStr)
+	if err != nil {
+		return NewAppError(http.StatusBadRequest, "INVALID_GRANT_ID", "grantId must be a valid UUID")
+	}
+	if err := c.grantService.TerminateSession(r.Context(), tenant.InstitutionID, tenant.UserID, grantID); err != nil {
+		return NewAppError(http.StatusInternalServerError, "TERMINATE_FAILED", "Failed to terminate support session")
+	}
+	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support session terminated successfully."})
 	return nil
 }

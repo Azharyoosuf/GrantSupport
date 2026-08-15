@@ -15,6 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
+	"grantsupport/ent"
 	"grantsupport/pkg/adapters/lock"
 	"grantsupport/pkg/adapters/replay"
 	"grantsupport/pkg/adapters/revocation"
@@ -245,6 +246,45 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	activeB, err := grantRepo.FindActiveGrantByTokenHash(ctx, tokenHashB)
 	if err != nil || activeB == nil {
 		t.Fatalf("[%s] Grant B in Tenant B should remain active after Tenant A revocation", dialectName)
+	}
+
+	// 10. Access Request Lifecycle & Atomic CAS Test
+	reqRepo := repository.NewAccessRequestRepository(baseRepo)
+	agentUser := uuid.New()
+	reqDomain := &domain.AccessRequest{
+		ID:                       uuid.Must(uuid.NewV7()),
+		InstitutionID:            instA,
+		RequesterID:              agentUser,
+		TargetService:            "billing-compliance",
+		Reason:                   "Testing cross-database compliance",
+		RequestedDurationMinutes: 60,
+		RequestedScope:           "billing:read",
+		RequestedIPs:             []string{"127.0.0.1"},
+		Status:                   domain.AccessRequestStatusPending,
+		ExpiresAt:                time.Now().Add(24 * time.Hour),
+		CreatedAt:                time.Now(),
+	}
+
+	createdEntReq, err := reqRepo.CreateAccessRequest(ctx, reqDomain)
+	if err != nil {
+		t.Fatalf("[%s] CreateAccessRequest failed: %v", dialectName, err)
+	}
+	if createdEntReq.Status != domain.AccessRequestStatusPending {
+		t.Fatalf("[%s] Expected status PENDING, got %s", dialectName, createdEntReq.Status)
+	}
+
+	// Approve via Transaction CAS
+	grantID := uuid.Must(uuid.NewV7())
+	err = baseRepo.Transaction(ctx, func(tx *ent.Tx) error {
+		return reqRepo.ApproveRequestCAS(ctx, tx, instA, reqDomain.ID, adminA, grantID, 45, "billing:read", []string{"127.0.0.1"})
+	})
+	if err != nil {
+		t.Fatalf("[%s] ApproveRequestCAS transaction failed: %v", dialectName, err)
+	}
+
+	approvedReq, err := reqRepo.FindAccessRequestByID(ctx, instA, reqDomain.ID)
+	if err != nil || approvedReq.Status != domain.AccessRequestStatusApproved {
+		t.Fatalf("[%s] FindAccessRequestByID after approval failed: req=%+v, err=%v", dialectName, approvedReq, err)
 	}
 }
 

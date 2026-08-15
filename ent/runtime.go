@@ -3,6 +3,7 @@
 package ent
 
 import (
+	"grantsupport/ent/accessrequest"
 	"grantsupport/ent/auditevent"
 	"grantsupport/ent/schema"
 	"grantsupport/ent/supportgrant"
@@ -15,10 +16,50 @@ import (
 // (default values, validators, hooks and policies) and stitches it
 // to their package variables.
 func init() {
+	accessrequestFields := schema.AccessRequest{}.Fields()
+	_ = accessrequestFields
+	// accessrequestDescTargetService is the schema descriptor for target_service field.
+	accessrequestDescTargetService := accessrequestFields[3].Descriptor()
+	// accessrequest.TargetServiceValidator is a validator for the "target_service" field. It is called by the builders before save.
+	accessrequest.TargetServiceValidator = accessrequestDescTargetService.Validators[0].(func(string) error)
+	// accessrequestDescReason is the schema descriptor for reason field.
+	accessrequestDescReason := accessrequestFields[4].Descriptor()
+	// accessrequest.ReasonValidator is a validator for the "reason" field. It is called by the builders before save.
+	accessrequest.ReasonValidator = accessrequestDescReason.Validators[0].(func(string) error)
+	// accessrequestDescRequestedDurationMinutes is the schema descriptor for requested_duration_minutes field.
+	accessrequestDescRequestedDurationMinutes := accessrequestFields[5].Descriptor()
+	// accessrequest.RequestedDurationMinutesValidator is a validator for the "requested_duration_minutes" field. It is called by the builders before save.
+	accessrequest.RequestedDurationMinutesValidator = accessrequestDescRequestedDurationMinutes.Validators[0].(func(int) error)
+	// accessrequestDescRequestedScope is the schema descriptor for requested_scope field.
+	accessrequestDescRequestedScope := accessrequestFields[7].Descriptor()
+	// accessrequest.DefaultRequestedScope holds the default value on creation for the requested_scope field.
+	accessrequest.DefaultRequestedScope = accessrequestDescRequestedScope.Default.(string)
+	// accessrequestDescRequestedIps is the schema descriptor for requested_ips field.
+	accessrequestDescRequestedIps := accessrequestFields[9].Descriptor()
+	// accessrequest.DefaultRequestedIps holds the default value on creation for the requested_ips field.
+	accessrequest.DefaultRequestedIps = accessrequestDescRequestedIps.Default.([]string)
+	// accessrequestDescApprovedIps is the schema descriptor for approved_ips field.
+	accessrequestDescApprovedIps := accessrequestFields[10].Descriptor()
+	// accessrequest.DefaultApprovedIps holds the default value on creation for the approved_ips field.
+	accessrequest.DefaultApprovedIps = accessrequestDescApprovedIps.Default.([]string)
+	// accessrequestDescStatus is the schema descriptor for status field.
+	accessrequestDescStatus := accessrequestFields[11].Descriptor()
+	// accessrequest.DefaultStatus holds the default value on creation for the status field.
+	accessrequest.DefaultStatus = accessrequestDescStatus.Default.(string)
+	// accessrequest.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	accessrequest.StatusValidator = accessrequestDescStatus.Validators[0].(func(string) error)
+	// accessrequestDescCreatedAt is the schema descriptor for created_at field.
+	accessrequestDescCreatedAt := accessrequestFields[20].Descriptor()
+	// accessrequest.DefaultCreatedAt holds the default value on creation for the created_at field.
+	accessrequest.DefaultCreatedAt = accessrequestDescCreatedAt.Default.(func() time.Time)
+	// accessrequestDescID is the schema descriptor for id field.
+	accessrequestDescID := accessrequestFields[0].Descriptor()
+	// accessrequest.DefaultID holds the default value on creation for the id field.
+	accessrequest.DefaultID = accessrequestDescID.Default.(func() uuid.UUID)
 	auditeventFields := schema.AuditEvent{}.Fields()
 	_ = auditeventFields
 	// auditeventDescCreatedAt is the schema descriptor for created_at field.
-	auditeventDescCreatedAt := auditeventFields[7].Descriptor()
+	auditeventDescCreatedAt := auditeventFields[6].Descriptor()
 	// auditevent.DefaultCreatedAt holds the default value on creation for the created_at field.
 	auditevent.DefaultCreatedAt = auditeventDescCreatedAt.Default.(func() time.Time)
 	// auditeventDescID is the schema descriptor for id field.
@@ -35,6 +76,10 @@ func init() {
 	supportgrantDescScope := supportgrantFields[8].Descriptor()
 	// supportgrant.DefaultScope holds the default value on creation for the scope field.
 	supportgrant.DefaultScope = supportgrantDescScope.Default.(string)
+	// supportgrantDescWhitelistedIps is the schema descriptor for whitelisted_ips field.
+	supportgrantDescWhitelistedIps := supportgrantFields[9].Descriptor()
+	// supportgrant.DefaultWhitelistedIps holds the default value on creation for the whitelisted_ips field.
+	supportgrant.DefaultWhitelistedIps = supportgrantDescWhitelistedIps.Default.([]string)
 	// supportgrantDescCreatedAt is the schema descriptor for created_at field.
 	supportgrantDescCreatedAt := supportgrantFields[10].Descriptor()
 	// supportgrant.DefaultCreatedAt holds the default value on creation for the created_at field.

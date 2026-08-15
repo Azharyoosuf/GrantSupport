@@ -19,7 +19,9 @@ import (
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
+	"grantsupport/pkg/domain"
 	"grantsupport/pkg/middleware"
+	"grantsupport/pkg/observability"
 	"grantsupport/pkg/ports"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
@@ -27,19 +29,29 @@ import (
 	"grantsupport/pkg/webhook"
 )
 
+// Version defines the current semantic version of GrantSupport.
+const Version = "v0.1.0-beta.3"
+
 // Engine is the central embeddable GrantSupport core engine instance.
 type Engine struct {
-	config            *EngineConfig
-	baseRepo          *repository.BaseRepository
-	grantRepo         *repository.SupportGrantRepository
-	auditRepo         *repository.SecurityAuditRepository
-	grantService      *service.GrantSupportService
-	grantController   *controller.SupportGrantController
-	lockStore         ports.LockStore
-	replayStore       ports.ReplayStore
-	revocationStore   ports.RevocationStore
-	rateLimiter       ports.RateLimiterStore
-	webhookDispatcher *webhook.WebhookDispatcher
+	config                  *EngineConfig
+	baseRepo                *repository.BaseRepository
+	grantRepo               *repository.SupportGrantRepository
+	auditRepo               *repository.SecurityAuditRepository
+	accessRequestRepo       *repository.AccessRequestRepository
+	grantService            *service.GrantSupportService
+	grantController         *controller.SupportGrantController
+	auditService            *service.SecurityAuditService
+	auditController         *controller.AuditController
+	accessRequestService    *service.AccessRequestService
+	accessRequestController *controller.AccessRequestController
+	jwksController          *controller.JWKSController
+	healthController        *controller.HealthController
+	lockStore               ports.LockStore
+	replayStore             ports.ReplayStore
+	revocationStore         ports.RevocationStore
+	rateLimiter             ports.RateLimiterStore
+	webhookDispatcher       *webhook.WebhookDispatcher
 }
 
 // NewEngine initializes a fully configured in-process GrantSupport engine.
@@ -158,6 +170,7 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	grantRepo := repository.NewSupportGrantRepository(baseRepo)
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	auditRepo.SetLockStore(lockStore)
+	accessRequestRepo := repository.NewAccessRequestRepository(baseRepo)
 
 	grantService := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
 	grantService.SetRevocationStore(revocationStore)
@@ -165,20 +178,37 @@ func NewEngine(opts ...Option) (*Engine, error) {
 		grantService.SetWebhookDispatcher(webhookDispatcher)
 	}
 
+	accessRequestService := service.NewAccessRequestService(baseRepo, accessRequestRepo, grantRepo, auditRepo, lockStore)
+	if webhookDispatcher != nil {
+		accessRequestService.SetWebhookDispatcher(webhookDispatcher)
+	}
+
 	grantController := controller.NewSupportGrantController(grantService)
+	auditService := service.NewSecurityAuditService(auditRepo)
+	auditController := controller.NewAuditController(auditService)
+	accessRequestController := controller.NewAccessRequestController(accessRequestService)
+	jwksController := controller.NewJWKSController()
+	healthController := controller.NewHealthController(Version, targetSQLDB, cfg.RedisClient)
 
 	return &Engine{
-		config:            cfg,
-		baseRepo:          baseRepo,
-		grantRepo:         grantRepo,
-		auditRepo:         auditRepo,
-		grantService:      grantService,
-		grantController:   grantController,
-		lockStore:         lockStore,
-		replayStore:       replayStore,
-		revocationStore:   revocationStore,
-		rateLimiter:       rateLimiter,
-		webhookDispatcher: webhookDispatcher,
+		config:                  cfg,
+		baseRepo:                baseRepo,
+		grantRepo:               grantRepo,
+		auditRepo:               auditRepo,
+		accessRequestRepo:       accessRequestRepo,
+		grantService:            grantService,
+		grantController:         grantController,
+		auditService:            auditService,
+		auditController:         auditController,
+		accessRequestService:    accessRequestService,
+		accessRequestController: accessRequestController,
+		jwksController:          jwksController,
+		healthController:        healthController,
+		lockStore:               lockStore,
+		replayStore:             replayStore,
+		revocationStore:         revocationStore,
+		rateLimiter:             rateLimiter,
+		webhookDispatcher:       webhookDispatcher,
 	}, nil
 }
 
@@ -188,8 +218,9 @@ func (e *Engine) CreateSupportGrant(ctx context.Context, institutionID, adminUse
 }
 
 // SupportLogin consumes a support grant token, emits an audit entry, and issues an RS256 JWT access token.
-func (e *Engine) SupportLogin(ctx context.Context, rawToken string, agentUserID uuid.UUID) (uuid.UUID, string, error) {
-	return e.grantService.SupportLogin(ctx, rawToken, agentUserID)
+// If the grant has whitelisted_ips configured, clientIP is validated before consumption.
+func (e *Engine) SupportLogin(ctx context.Context, rawToken string, agentUserID uuid.UUID, clientIP ...string) (uuid.UUID, string, error) {
+	return e.grantService.SupportLogin(ctx, rawToken, agentUserID, clientIP...)
 }
 
 // RevokeSupportGrant invalidates all active support access grants for an institution and terminates active support-agent sessions.
@@ -202,6 +233,16 @@ func (e *Engine) SupportLogout(ctx context.Context, institutionID, agentUserID u
 	return e.grantService.SupportLogout(ctx, institutionID, agentUserID)
 }
 
+// GetActiveSessions queries all active redeemed support sessions for an institution.
+func (e *Engine) GetActiveSessions(ctx context.Context, institutionID uuid.UUID) ([]*domain.ActiveSession, error) {
+	return e.grantService.GetActiveSessions(ctx, institutionID)
+}
+
+// TerminateSession terminates a specific active support session by grant ID.
+func (e *Engine) TerminateSession(ctx context.Context, institutionID, adminUserID, grantID uuid.UUID) error {
+	return e.grantService.TerminateSession(ctx, institutionID, adminUserID, grantID)
+}
+
 // VerifyAuditChain cryptographically verifies the SHA-256 hash-chain across all historical events for an institution.
 func (e *Engine) VerifyAuditChain(ctx context.Context, institutionID uuid.UUID) (bool, error) {
 	return e.auditRepo.VerifyAuditChain(ctx, institutionID)
@@ -210,6 +251,36 @@ func (e *Engine) VerifyAuditChain(ctx context.Context, institutionID uuid.UUID) 
 // GetAuditEvents queries paginated audit log events for an institution.
 func (e *Engine) GetAuditEvents(ctx context.Context, institutionID uuid.UUID, limit, offset int) ([]*ent.AuditEvent, error) {
 	return e.auditRepo.GetAuditEventsByInstitution(ctx, institutionID, limit, offset)
+}
+
+// CreateAccessRequest creates and persists a new pending access request.
+func (e *Engine) CreateAccessRequest(ctx context.Context, institutionID, requesterID uuid.UUID, input domain.CreateAccessRequestInput) (*domain.AccessRequest, error) {
+	return e.accessRequestService.CreateAccessRequest(ctx, institutionID, requesterID, input)
+}
+
+// GetAccessRequest retrieves an access request by ID.
+func (e *Engine) GetAccessRequest(ctx context.Context, institutionID, requestID uuid.UUID) (*domain.AccessRequest, error) {
+	return e.accessRequestService.GetAccessRequest(ctx, institutionID, requestID)
+}
+
+// ListAccessRequests retrieves paginated access requests for an institution.
+func (e *Engine) ListAccessRequests(ctx context.Context, institutionID uuid.UUID, status string, requesterID *uuid.UUID, limit, offset int) ([]*domain.AccessRequest, error) {
+	return e.accessRequestService.ListAccessRequests(ctx, institutionID, status, requesterID, limit, offset)
+}
+
+// ApproveAccessRequest atomically transitions the request to APPROVED, creates a SupportGrant, and logs the audit event.
+func (e *Engine) ApproveAccessRequest(ctx context.Context, institutionID, approverID, requestID uuid.UUID, input domain.ApproveAccessRequestInput) (*domain.ApproveAccessRequestResult, error) {
+	return e.accessRequestService.ApproveAccessRequest(ctx, institutionID, approverID, requestID, input)
+}
+
+// RejectAccessRequest atomically transitions the request to REJECTED and logs the audit event.
+func (e *Engine) RejectAccessRequest(ctx context.Context, institutionID, rejecterID, requestID uuid.UUID, input domain.RejectAccessRequestInput) error {
+	return e.accessRequestService.RejectAccessRequest(ctx, institutionID, rejecterID, requestID, input)
+}
+
+// CancelAccessRequest transitions a pending request to CANCELLED.
+func (e *Engine) CancelAccessRequest(ctx context.Context, institutionID, actorID, requestID uuid.UUID, isCallerAdmin bool) error {
+	return e.accessRequestService.CancelAccessRequest(ctx, institutionID, actorID, requestID, isCallerAdmin)
 }
 
 // HTTPHandler returns a ready-to-mount standard http.Handler / chi.Router with all GrantSupport endpoints.
@@ -221,24 +292,84 @@ func (e *Engine) HTTPHandler() http.Handler {
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.CorrelationIDMiddleware)
 
-	// Health Check
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"UP","service":"GrantSupport Engine","version":"v1.0.0"}`))
-	})
+	// Public Health & Readiness Probes
+	r.Get("/health", controller.CatchAsync(e.healthController.Live))
+	r.Get("/health/live", controller.CatchAsync(e.healthController.Live))
+	r.Get("/health/ready", controller.CatchAsync(e.healthController.Ready))
+
+	// Prometheus Metrics Scraper Endpoint
+	r.Get("/metrics", observability.DefaultRegistry.Handler())
+
+	// Public JWKS Endpoint
+	r.Get("/.well-known/jwks.json", controller.CatchAsync(e.jwksController.GetJWKS))
 
 	// Public Support Login (Rate limited to 10 attempts per minute per IP)
 	r.With(
 		middleware.RateLimitMiddleware(e.rateLimiter, 10, 60),
 	).Post("/api/v1/auth/support/login", controller.CatchAsync(e.grantController.SupportLogin))
 
-	// Authenticated Admin Endpoints
+	// Authenticated Access Request & Customer Admin Endpoints
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.NewAuthMiddleware(e.revocationStore))
-		r.Use(middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"))
-		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(e.grantController.GrantSupport))
-		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(e.grantController.RevokeSupport))
+
+		// Access Request Creation (Rate limited to 10 req/min)
+		r.With(
+			middleware.RequireRoles("SUPPORT_AGENT"),
+			middleware.RateLimitMiddleware(e.rateLimiter, 10, 60),
+		).Post("/api/v1/access-requests", controller.CatchAsync(e.accessRequestController.CreateAccessRequest))
+
+		// Access Request Queries & Cancellation (Shared: Admin & Agent)
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
+		).Get("/api/v1/access-requests", controller.CatchAsync(e.accessRequestController.ListAccessRequests))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
+		).Get("/api/v1/access-requests/{id}", controller.CatchAsync(e.accessRequestController.GetAccessRequest))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
+		).Post("/api/v1/access-requests/{id}/cancel", controller.CatchAsync(e.accessRequestController.CancelAccessRequest))
+
+		// Customer Admin Access Request Approval & Rejection (Rate limited to 20 req/min)
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(e.rateLimiter, 20, 60),
+		).Post("/api/v1/access-requests/{id}/approve", controller.CatchAsync(e.accessRequestController.ApproveAccessRequest))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(e.rateLimiter, 20, 60),
+		).Post("/api/v1/access-requests/{id}/reject", controller.CatchAsync(e.accessRequestController.RejectAccessRequest))
+
+		// Customer Admin Direct Grant Endpoints
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(e.rateLimiter, 20, 60),
+		).Post("/api/v1/auth/support/grant", controller.CatchAsync(e.grantController.GrantSupport))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(e.rateLimiter, 10, 60),
+		).Post("/api/v1/auth/support/revoke", controller.CatchAsync(e.grantController.RevokeSupport))
+
+		// Active Session Management
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Get("/api/v1/auth/support/sessions", controller.CatchAsync(e.grantController.GetActiveSessions))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Delete("/api/v1/auth/support/sessions/{grantId}", controller.CatchAsync(e.grantController.TerminateSession))
+
+		// Cryptographic Audit Ledger APIs
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Get("/api/v1/audit/events", controller.CatchAsync(e.auditController.GetAuditEvents))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Post("/api/v1/audit/verify", controller.CatchAsync(e.auditController.VerifyAuditChain))
 	})
 
 	// Authenticated Support Agent Logout Endpoint

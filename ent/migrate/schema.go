@@ -9,6 +9,53 @@ import (
 )
 
 var (
+	// GsAccessRequestsColumns holds the columns for the "gs_access_requests" table.
+	GsAccessRequestsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeUUID},
+		{Name: "institution_id", Type: field.TypeUUID},
+		{Name: "requester_id", Type: field.TypeUUID},
+		{Name: "target_service", Type: field.TypeString, Nullable: true, Size: 128},
+		{Name: "reason", Type: field.TypeString},
+		{Name: "requested_duration_minutes", Type: field.TypeInt},
+		{Name: "approved_duration_minutes", Type: field.TypeInt, Nullable: true},
+		{Name: "requested_scope", Type: field.TypeString, Default: "FULL_ACCESS"},
+		{Name: "approved_scope", Type: field.TypeString, Nullable: true},
+		{Name: "requested_ips", Type: field.TypeJSON, Nullable: true},
+		{Name: "approved_ips", Type: field.TypeJSON, Nullable: true},
+		{Name: "status", Type: field.TypeString, Size: 32, Default: "PENDING"},
+		{Name: "expires_at", Type: field.TypeTime, SchemaType: map[string]string{"mysql": "datetime(6)", "postgres": "timestamptz"}},
+		{Name: "approved_by_id", Type: field.TypeUUID, Nullable: true},
+		{Name: "approved_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"mysql": "datetime(6)", "postgres": "timestamptz"}},
+		{Name: "rejected_by_id", Type: field.TypeUUID, Nullable: true},
+		{Name: "rejection_reason", Type: field.TypeString, Nullable: true},
+		{Name: "rejected_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"mysql": "datetime(6)", "postgres": "timestamptz"}},
+		{Name: "cancelled_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"mysql": "datetime(6)", "postgres": "timestamptz"}},
+		{Name: "support_grant_id", Type: field.TypeUUID, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"mysql": "datetime(6)", "postgres": "timestamptz"}},
+	}
+	// GsAccessRequestsTable holds the schema information for the "gs_access_requests" table.
+	GsAccessRequestsTable = &schema.Table{
+		Name:       "gs_access_requests",
+		Columns:    GsAccessRequestsColumns,
+		PrimaryKey: []*schema.Column{GsAccessRequestsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "accessrequest_institution_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{GsAccessRequestsColumns[1], GsAccessRequestsColumns[11]},
+			},
+			{
+				Name:    "accessrequest_institution_id_requester_id",
+				Unique:  false,
+				Columns: []*schema.Column{GsAccessRequestsColumns[1], GsAccessRequestsColumns[2]},
+			},
+			{
+				Name:    "accessrequest_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{GsAccessRequestsColumns[12]},
+			},
+		},
+	}
 	// GsAuditEventsColumns holds the columns for the "gs_audit_events" table.
 	GsAuditEventsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeUUID},
@@ -17,7 +64,6 @@ var (
 		{Name: "event_type", Type: field.TypeString},
 		{Name: "description", Type: field.TypeString, Nullable: true},
 		{Name: "hash_chain", Type: field.TypeString, Nullable: true},
-		{Name: "signature", Type: field.TypeString, Nullable: true},
 		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"mysql": "datetime(6)", "postgres": "timestamptz"}},
 	}
 	// GsAuditEventsTable holds the schema information for the "gs_audit_events" table.
@@ -29,7 +75,7 @@ var (
 			{
 				Name:    "auditevent_institution_id_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{GsAuditEventsColumns[1], GsAuditEventsColumns[7]},
+				Columns: []*schema.Column{GsAuditEventsColumns[1], GsAuditEventsColumns[6]},
 			},
 			{
 				Name:    "auditevent_actor_id",
@@ -65,12 +111,16 @@ var (
 	}
 	// Tables holds all the tables in the schema.
 	Tables = []*schema.Table{
+		GsAccessRequestsTable,
 		GsAuditEventsTable,
 		GsSupportGrantsTable,
 	}
 )
 
 func init() {
+	GsAccessRequestsTable.Annotation = &entsql.Annotation{
+		Table: "gs_access_requests",
+	}
 	GsAuditEventsTable.Annotation = &entsql.Annotation{
 		Table: "gs_audit_events",
 	}

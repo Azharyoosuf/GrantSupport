@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [ main ]
 
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     name: Build, Vet, Test & Race Detector Matrix
@@ -76,6 +79,15 @@ jobs:
           go-version: '1.25'
           cache: true
 
+      - name: Go Formatting Check (gofmt)
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "Error: Unformatted Go source files detected:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
       - name: Go Mod Tidy & Download
         run: |
           go mod tidy
@@ -102,3 +114,10 @@ jobs:
           TEST_MARIADB_URL: grantsupport:secretpassword@tcp(localhost:3307)/grantsupport?parseTime=true
           VALKEY_CACHE_URL: valkey://localhost:6379/0
         run: go test -v -race -count=1 ./...
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Verify Multi-Arch Docker Build (amd64, arm64)
+        run: |
+          docker buildx build --platform linux/amd64,linux/arm64 -f Dockerfile .

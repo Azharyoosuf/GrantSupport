@@ -15,13 +15,16 @@ import (
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 	_ "github.com/go-sql-driver/mysql"
 	_ "github.com/jackc/pgx/v5/stdlib"
+	"github.com/redis/go-redis/v9"
 	"grantsupport/pkg/adapters/lock"
 	"grantsupport/pkg/adapters/ratelimit"
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/cache"
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
+	"grantsupport/pkg/grantsupport"
 	"grantsupport/pkg/middleware"
+	"grantsupport/pkg/observability"
 	"grantsupport/pkg/ports"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
@@ -31,7 +34,7 @@ import (
 )
 
 func main() {
-	slog.Info("Starting GrantSupport Engine...", slog.String("version", "v1.0.0"))
+	slog.Info("Starting GrantSupport Engine...", slog.String("version", grantsupport.Version))
 
 	cfg := config.AppConfig
 	if cfg == nil {
@@ -116,6 +119,7 @@ func main() {
 	var lockStore ports.LockStore
 	var revocationStore ports.RevocationStore
 	var rateLimiter ports.RateLimiterStore
+	var redisClient *redis.Client
 
 	if cfg.ValkeyCacheURL != "" {
 		valkeyClient, err := cache.NewValkeyClient(cfg.ValkeyCacheURL)
@@ -125,6 +129,7 @@ func main() {
 			revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
 			rateLimiter = ratelimit.NewMemoryRateLimiter()
 		} else {
+			redisClient = valkeyClient.Client
 			lockStore = lock.NewRedisLockStore(valkeyClient.Client)
 			revocationStore = revocation.NewRedisRevocationStore(valkeyClient.Client)
 			rateLimiter = ratelimit.NewRedisRateLimiter(valkeyClient.Client)
@@ -140,20 +145,33 @@ func main() {
 	supportGrantRepo := repository.NewSupportGrantRepository(baseRepo)
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	auditRepo.SetLockStore(lockStore)
+	accessRequestRepo := repository.NewAccessRequestRepository(baseRepo)
 
 	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
 	grantService.SetRevocationStore(revocationStore)
+
+	var webhookDispatcher *webhook.WebhookDispatcher
 	if cfg.WebhookURL != "" {
 		if cfg.WebhookSecret == "" {
 			slog.Warn("Webhook URL configured without WEBHOOK_SECRET: webhook delivery disabled (unsigned webhooks are prohibited)")
 		} else {
-			webhookDispatcher := webhook.NewWebhookDispatcher(cfg.WebhookURL, cfg.WebhookSecret)
+			webhookDispatcher = webhook.NewWebhookDispatcher(cfg.WebhookURL, cfg.WebhookSecret)
 			grantService.SetWebhookDispatcher(webhookDispatcher)
 			slog.Info("Webhook dispatcher initialized", slog.String("url", cfg.WebhookURL))
 		}
 	}
 
+	accessRequestService := service.NewAccessRequestService(baseRepo, accessRequestRepo, supportGrantRepo, auditRepo, lockStore)
+	if webhookDispatcher != nil {
+		accessRequestService.SetWebhookDispatcher(webhookDispatcher)
+	}
+
 	grantController := controller.NewSupportGrantController(grantService)
+	auditService := service.NewSecurityAuditService(auditRepo)
+	auditController := controller.NewAuditController(auditService)
+	accessRequestController := controller.NewAccessRequestController(accessRequestService)
+	jwksController := controller.NewJWKSController()
+	healthController := controller.NewHealthController(grantsupport.Version, sqlDB, redisClient)
 
 	// Router Setup
 	r := chi.NewRouter()
@@ -164,24 +182,84 @@ func main() {
 	r.Use(middleware.CorrelationIDMiddleware)
 	r.Use(middleware.SecurityHeadersMiddleware)
 
-	// Public Health Endpoint
-	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"UP","service":"GrantSupport Engine","version":"v1.0.0"}`))
-	})
+	// Public Health & Readiness Probes
+	r.Get("/health", controller.CatchAsync(healthController.Live))
+	r.Get("/health/live", controller.CatchAsync(healthController.Live))
+	r.Get("/health/ready", controller.CatchAsync(healthController.Ready))
+
+	// Prometheus Metrics Scraper Endpoint
+	r.Get("/metrics", observability.DefaultRegistry.Handler())
+
+	// Public JWKS Endpoint
+	r.Get("/.well-known/jwks.json", controller.CatchAsync(jwksController.GetJWKS))
 
 	// Public Support Agent Login Endpoint (Rate limited to 10 attempts per minute per IP)
 	r.With(
 		middleware.RateLimitMiddleware(rateLimiter, 10, 60),
 	).Post("/api/v1/auth/support/login", controller.CatchAsync(grantController.SupportLogin))
 
-	// Authenticated Customer Admin Delegation Endpoints
+	// Authenticated Access Request & Customer Admin Endpoints
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.NewAuthMiddleware(revocationStore))
-		r.Use(middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"))
-		r.Post("/api/v1/auth/support/grant", controller.CatchAsync(grantController.GrantSupport))
-		r.Post("/api/v1/auth/support/revoke", controller.CatchAsync(grantController.RevokeSupport))
+
+		// Access Request Creation (Rate limited to 10 req/min)
+		r.With(
+			middleware.RequireRoles("SUPPORT_AGENT"),
+			middleware.RateLimitMiddleware(rateLimiter, 10, 60),
+		).Post("/api/v1/access-requests", controller.CatchAsync(accessRequestController.CreateAccessRequest))
+
+		// Access Request Queries & Cancellation (Shared: Admin & Agent)
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
+		).Get("/api/v1/access-requests", controller.CatchAsync(accessRequestController.ListAccessRequests))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
+		).Get("/api/v1/access-requests/{id}", controller.CatchAsync(accessRequestController.GetAccessRequest))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
+		).Post("/api/v1/access-requests/{id}/cancel", controller.CatchAsync(accessRequestController.CancelAccessRequest))
+
+		// Customer Admin Access Request Approval & Rejection (Rate limited to 20 req/min)
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(rateLimiter, 20, 60),
+		).Post("/api/v1/access-requests/{id}/approve", controller.CatchAsync(accessRequestController.ApproveAccessRequest))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(rateLimiter, 20, 60),
+		).Post("/api/v1/access-requests/{id}/reject", controller.CatchAsync(accessRequestController.RejectAccessRequest))
+
+		// Customer Admin Direct Grant Endpoints
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(rateLimiter, 20, 60),
+		).Post("/api/v1/auth/support/grant", controller.CatchAsync(grantController.GrantSupport))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(rateLimiter, 10, 60),
+		).Post("/api/v1/auth/support/revoke", controller.CatchAsync(grantController.RevokeSupport))
+
+		// Active Session Management
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Get("/api/v1/auth/support/sessions", controller.CatchAsync(grantController.GetActiveSessions))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Delete("/api/v1/auth/support/sessions/{grantId}", controller.CatchAsync(grantController.TerminateSession))
+
+		// Cryptographic Audit Ledger APIs
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Get("/api/v1/audit/events", controller.CatchAsync(auditController.GetAuditEvents))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Post("/api/v1/audit/verify", controller.CatchAsync(auditController.VerifyAuditChain))
 	})
 
 	// Authenticated Support Agent Logout Endpoint

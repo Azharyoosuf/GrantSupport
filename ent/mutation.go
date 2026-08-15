@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"grantsupport/ent/accessrequest"
 	"grantsupport/ent/auditevent"
 	"grantsupport/ent/predicate"
 	"grantsupport/ent/supportgrant"
@@ -26,9 +27,1703 @@ const (
 	OpUpdateOne = ent.OpUpdateOne
 
 	// Node types.
-	TypeAuditEvent   = "AuditEvent"
-	TypeSupportGrant = "SupportGrant"
+	TypeAccessRequest = "AccessRequest"
+	TypeAuditEvent    = "AuditEvent"
+	TypeSupportGrant  = "SupportGrant"
 )
+
+// AccessRequestMutation represents an operation that mutates the AccessRequest nodes in the graph.
+type AccessRequestMutation struct {
+	config
+	op                            Op
+	typ                           string
+	id                            *uuid.UUID
+	institution_id                *uuid.UUID
+	requester_id                  *uuid.UUID
+	target_service                *string
+	reason                        *string
+	requested_duration_minutes    *int
+	addrequested_duration_minutes *int
+	approved_duration_minutes     *int
+	addapproved_duration_minutes  *int
+	requested_scope               *string
+	approved_scope                *string
+	requested_ips                 *[]string
+	appendrequested_ips           []string
+	approved_ips                  *[]string
+	appendapproved_ips            []string
+	status                        *string
+	expires_at                    *time.Time
+	approved_by_id                *uuid.UUID
+	approved_at                   *time.Time
+	rejected_by_id                *uuid.UUID
+	rejection_reason              *string
+	rejected_at                   *time.Time
+	cancelled_at                  *time.Time
+	support_grant_id              *uuid.UUID
+	created_at                    *time.Time
+	clearedFields                 map[string]struct{}
+	done                          bool
+	oldValue                      func(context.Context) (*AccessRequest, error)
+	predicates                    []predicate.AccessRequest
+}
+
+var _ ent.Mutation = (*AccessRequestMutation)(nil)
+
+// accessrequestOption allows management of the mutation configuration using functional options.
+type accessrequestOption func(*AccessRequestMutation)
+
+// newAccessRequestMutation creates new mutation for the AccessRequest entity.
+func newAccessRequestMutation(c config, op Op, opts ...accessrequestOption) *AccessRequestMutation {
+	m := &AccessRequestMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeAccessRequest,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withAccessRequestID sets the ID field of the mutation.
+func withAccessRequestID(id uuid.UUID) accessrequestOption {
+	return func(m *AccessRequestMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *AccessRequest
+		)
+		m.oldValue = func(ctx context.Context) (*AccessRequest, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().AccessRequest.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withAccessRequest sets the old AccessRequest of the mutation.
+func withAccessRequest(node *AccessRequest) accessrequestOption {
+	return func(m *AccessRequestMutation) {
+		m.oldValue = func(context.Context) (*AccessRequest, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m AccessRequestMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m AccessRequestMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// SetID sets the value of the id field. Note that this
+// operation is only accepted on creation of AccessRequest entities.
+func (m *AccessRequestMutation) SetID(id uuid.UUID) {
+	m.id = &id
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *AccessRequestMutation) ID() (id uuid.UUID, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *AccessRequestMutation) IDs(ctx context.Context) ([]uuid.UUID, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []uuid.UUID{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().AccessRequest.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetInstitutionID sets the "institution_id" field.
+func (m *AccessRequestMutation) SetInstitutionID(u uuid.UUID) {
+	m.institution_id = &u
+}
+
+// InstitutionID returns the value of the "institution_id" field in the mutation.
+func (m *AccessRequestMutation) InstitutionID() (r uuid.UUID, exists bool) {
+	v := m.institution_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInstitutionID returns the old "institution_id" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldInstitutionID(ctx context.Context) (v uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInstitutionID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInstitutionID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInstitutionID: %w", err)
+	}
+	return oldValue.InstitutionID, nil
+}
+
+// ResetInstitutionID resets all changes to the "institution_id" field.
+func (m *AccessRequestMutation) ResetInstitutionID() {
+	m.institution_id = nil
+}
+
+// SetRequesterID sets the "requester_id" field.
+func (m *AccessRequestMutation) SetRequesterID(u uuid.UUID) {
+	m.requester_id = &u
+}
+
+// RequesterID returns the value of the "requester_id" field in the mutation.
+func (m *AccessRequestMutation) RequesterID() (r uuid.UUID, exists bool) {
+	v := m.requester_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequesterID returns the old "requester_id" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldRequesterID(ctx context.Context) (v uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequesterID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequesterID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequesterID: %w", err)
+	}
+	return oldValue.RequesterID, nil
+}
+
+// ResetRequesterID resets all changes to the "requester_id" field.
+func (m *AccessRequestMutation) ResetRequesterID() {
+	m.requester_id = nil
+}
+
+// SetTargetService sets the "target_service" field.
+func (m *AccessRequestMutation) SetTargetService(s string) {
+	m.target_service = &s
+}
+
+// TargetService returns the value of the "target_service" field in the mutation.
+func (m *AccessRequestMutation) TargetService() (r string, exists bool) {
+	v := m.target_service
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTargetService returns the old "target_service" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldTargetService(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTargetService is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTargetService requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTargetService: %w", err)
+	}
+	return oldValue.TargetService, nil
+}
+
+// ClearTargetService clears the value of the "target_service" field.
+func (m *AccessRequestMutation) ClearTargetService() {
+	m.target_service = nil
+	m.clearedFields[accessrequest.FieldTargetService] = struct{}{}
+}
+
+// TargetServiceCleared returns if the "target_service" field was cleared in this mutation.
+func (m *AccessRequestMutation) TargetServiceCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldTargetService]
+	return ok
+}
+
+// ResetTargetService resets all changes to the "target_service" field.
+func (m *AccessRequestMutation) ResetTargetService() {
+	m.target_service = nil
+	delete(m.clearedFields, accessrequest.FieldTargetService)
+}
+
+// SetReason sets the "reason" field.
+func (m *AccessRequestMutation) SetReason(s string) {
+	m.reason = &s
+}
+
+// Reason returns the value of the "reason" field in the mutation.
+func (m *AccessRequestMutation) Reason() (r string, exists bool) {
+	v := m.reason
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReason returns the old "reason" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldReason(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReason is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReason requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReason: %w", err)
+	}
+	return oldValue.Reason, nil
+}
+
+// ResetReason resets all changes to the "reason" field.
+func (m *AccessRequestMutation) ResetReason() {
+	m.reason = nil
+}
+
+// SetRequestedDurationMinutes sets the "requested_duration_minutes" field.
+func (m *AccessRequestMutation) SetRequestedDurationMinutes(i int) {
+	m.requested_duration_minutes = &i
+	m.addrequested_duration_minutes = nil
+}
+
+// RequestedDurationMinutes returns the value of the "requested_duration_minutes" field in the mutation.
+func (m *AccessRequestMutation) RequestedDurationMinutes() (r int, exists bool) {
+	v := m.requested_duration_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestedDurationMinutes returns the old "requested_duration_minutes" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldRequestedDurationMinutes(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestedDurationMinutes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestedDurationMinutes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestedDurationMinutes: %w", err)
+	}
+	return oldValue.RequestedDurationMinutes, nil
+}
+
+// AddRequestedDurationMinutes adds i to the "requested_duration_minutes" field.
+func (m *AccessRequestMutation) AddRequestedDurationMinutes(i int) {
+	if m.addrequested_duration_minutes != nil {
+		*m.addrequested_duration_minutes += i
+	} else {
+		m.addrequested_duration_minutes = &i
+	}
+}
+
+// AddedRequestedDurationMinutes returns the value that was added to the "requested_duration_minutes" field in this mutation.
+func (m *AccessRequestMutation) AddedRequestedDurationMinutes() (r int, exists bool) {
+	v := m.addrequested_duration_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetRequestedDurationMinutes resets all changes to the "requested_duration_minutes" field.
+func (m *AccessRequestMutation) ResetRequestedDurationMinutes() {
+	m.requested_duration_minutes = nil
+	m.addrequested_duration_minutes = nil
+}
+
+// SetApprovedDurationMinutes sets the "approved_duration_minutes" field.
+func (m *AccessRequestMutation) SetApprovedDurationMinutes(i int) {
+	m.approved_duration_minutes = &i
+	m.addapproved_duration_minutes = nil
+}
+
+// ApprovedDurationMinutes returns the value of the "approved_duration_minutes" field in the mutation.
+func (m *AccessRequestMutation) ApprovedDurationMinutes() (r int, exists bool) {
+	v := m.approved_duration_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldApprovedDurationMinutes returns the old "approved_duration_minutes" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldApprovedDurationMinutes(ctx context.Context) (v *int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldApprovedDurationMinutes is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldApprovedDurationMinutes requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldApprovedDurationMinutes: %w", err)
+	}
+	return oldValue.ApprovedDurationMinutes, nil
+}
+
+// AddApprovedDurationMinutes adds i to the "approved_duration_minutes" field.
+func (m *AccessRequestMutation) AddApprovedDurationMinutes(i int) {
+	if m.addapproved_duration_minutes != nil {
+		*m.addapproved_duration_minutes += i
+	} else {
+		m.addapproved_duration_minutes = &i
+	}
+}
+
+// AddedApprovedDurationMinutes returns the value that was added to the "approved_duration_minutes" field in this mutation.
+func (m *AccessRequestMutation) AddedApprovedDurationMinutes() (r int, exists bool) {
+	v := m.addapproved_duration_minutes
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearApprovedDurationMinutes clears the value of the "approved_duration_minutes" field.
+func (m *AccessRequestMutation) ClearApprovedDurationMinutes() {
+	m.approved_duration_minutes = nil
+	m.addapproved_duration_minutes = nil
+	m.clearedFields[accessrequest.FieldApprovedDurationMinutes] = struct{}{}
+}
+
+// ApprovedDurationMinutesCleared returns if the "approved_duration_minutes" field was cleared in this mutation.
+func (m *AccessRequestMutation) ApprovedDurationMinutesCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldApprovedDurationMinutes]
+	return ok
+}
+
+// ResetApprovedDurationMinutes resets all changes to the "approved_duration_minutes" field.
+func (m *AccessRequestMutation) ResetApprovedDurationMinutes() {
+	m.approved_duration_minutes = nil
+	m.addapproved_duration_minutes = nil
+	delete(m.clearedFields, accessrequest.FieldApprovedDurationMinutes)
+}
+
+// SetRequestedScope sets the "requested_scope" field.
+func (m *AccessRequestMutation) SetRequestedScope(s string) {
+	m.requested_scope = &s
+}
+
+// RequestedScope returns the value of the "requested_scope" field in the mutation.
+func (m *AccessRequestMutation) RequestedScope() (r string, exists bool) {
+	v := m.requested_scope
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestedScope returns the old "requested_scope" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldRequestedScope(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestedScope is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestedScope requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestedScope: %w", err)
+	}
+	return oldValue.RequestedScope, nil
+}
+
+// ResetRequestedScope resets all changes to the "requested_scope" field.
+func (m *AccessRequestMutation) ResetRequestedScope() {
+	m.requested_scope = nil
+}
+
+// SetApprovedScope sets the "approved_scope" field.
+func (m *AccessRequestMutation) SetApprovedScope(s string) {
+	m.approved_scope = &s
+}
+
+// ApprovedScope returns the value of the "approved_scope" field in the mutation.
+func (m *AccessRequestMutation) ApprovedScope() (r string, exists bool) {
+	v := m.approved_scope
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldApprovedScope returns the old "approved_scope" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldApprovedScope(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldApprovedScope is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldApprovedScope requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldApprovedScope: %w", err)
+	}
+	return oldValue.ApprovedScope, nil
+}
+
+// ClearApprovedScope clears the value of the "approved_scope" field.
+func (m *AccessRequestMutation) ClearApprovedScope() {
+	m.approved_scope = nil
+	m.clearedFields[accessrequest.FieldApprovedScope] = struct{}{}
+}
+
+// ApprovedScopeCleared returns if the "approved_scope" field was cleared in this mutation.
+func (m *AccessRequestMutation) ApprovedScopeCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldApprovedScope]
+	return ok
+}
+
+// ResetApprovedScope resets all changes to the "approved_scope" field.
+func (m *AccessRequestMutation) ResetApprovedScope() {
+	m.approved_scope = nil
+	delete(m.clearedFields, accessrequest.FieldApprovedScope)
+}
+
+// SetRequestedIps sets the "requested_ips" field.
+func (m *AccessRequestMutation) SetRequestedIps(s []string) {
+	m.requested_ips = &s
+	m.appendrequested_ips = nil
+}
+
+// RequestedIps returns the value of the "requested_ips" field in the mutation.
+func (m *AccessRequestMutation) RequestedIps() (r []string, exists bool) {
+	v := m.requested_ips
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestedIps returns the old "requested_ips" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldRequestedIps(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestedIps is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestedIps requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestedIps: %w", err)
+	}
+	return oldValue.RequestedIps, nil
+}
+
+// AppendRequestedIps adds s to the "requested_ips" field.
+func (m *AccessRequestMutation) AppendRequestedIps(s []string) {
+	m.appendrequested_ips = append(m.appendrequested_ips, s...)
+}
+
+// AppendedRequestedIps returns the list of values that were appended to the "requested_ips" field in this mutation.
+func (m *AccessRequestMutation) AppendedRequestedIps() ([]string, bool) {
+	if len(m.appendrequested_ips) == 0 {
+		return nil, false
+	}
+	return m.appendrequested_ips, true
+}
+
+// ClearRequestedIps clears the value of the "requested_ips" field.
+func (m *AccessRequestMutation) ClearRequestedIps() {
+	m.requested_ips = nil
+	m.appendrequested_ips = nil
+	m.clearedFields[accessrequest.FieldRequestedIps] = struct{}{}
+}
+
+// RequestedIpsCleared returns if the "requested_ips" field was cleared in this mutation.
+func (m *AccessRequestMutation) RequestedIpsCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldRequestedIps]
+	return ok
+}
+
+// ResetRequestedIps resets all changes to the "requested_ips" field.
+func (m *AccessRequestMutation) ResetRequestedIps() {
+	m.requested_ips = nil
+	m.appendrequested_ips = nil
+	delete(m.clearedFields, accessrequest.FieldRequestedIps)
+}
+
+// SetApprovedIps sets the "approved_ips" field.
+func (m *AccessRequestMutation) SetApprovedIps(s []string) {
+	m.approved_ips = &s
+	m.appendapproved_ips = nil
+}
+
+// ApprovedIps returns the value of the "approved_ips" field in the mutation.
+func (m *AccessRequestMutation) ApprovedIps() (r []string, exists bool) {
+	v := m.approved_ips
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldApprovedIps returns the old "approved_ips" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldApprovedIps(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldApprovedIps is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldApprovedIps requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldApprovedIps: %w", err)
+	}
+	return oldValue.ApprovedIps, nil
+}
+
+// AppendApprovedIps adds s to the "approved_ips" field.
+func (m *AccessRequestMutation) AppendApprovedIps(s []string) {
+	m.appendapproved_ips = append(m.appendapproved_ips, s...)
+}
+
+// AppendedApprovedIps returns the list of values that were appended to the "approved_ips" field in this mutation.
+func (m *AccessRequestMutation) AppendedApprovedIps() ([]string, bool) {
+	if len(m.appendapproved_ips) == 0 {
+		return nil, false
+	}
+	return m.appendapproved_ips, true
+}
+
+// ClearApprovedIps clears the value of the "approved_ips" field.
+func (m *AccessRequestMutation) ClearApprovedIps() {
+	m.approved_ips = nil
+	m.appendapproved_ips = nil
+	m.clearedFields[accessrequest.FieldApprovedIps] = struct{}{}
+}
+
+// ApprovedIpsCleared returns if the "approved_ips" field was cleared in this mutation.
+func (m *AccessRequestMutation) ApprovedIpsCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldApprovedIps]
+	return ok
+}
+
+// ResetApprovedIps resets all changes to the "approved_ips" field.
+func (m *AccessRequestMutation) ResetApprovedIps() {
+	m.approved_ips = nil
+	m.appendapproved_ips = nil
+	delete(m.clearedFields, accessrequest.FieldApprovedIps)
+}
+
+// SetStatus sets the "status" field.
+func (m *AccessRequestMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *AccessRequestMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *AccessRequestMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetExpiresAt sets the "expires_at" field.
+func (m *AccessRequestMutation) SetExpiresAt(t time.Time) {
+	m.expires_at = &t
+}
+
+// ExpiresAt returns the value of the "expires_at" field in the mutation.
+func (m *AccessRequestMutation) ExpiresAt() (r time.Time, exists bool) {
+	v := m.expires_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExpiresAt returns the old "expires_at" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldExpiresAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExpiresAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExpiresAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExpiresAt: %w", err)
+	}
+	return oldValue.ExpiresAt, nil
+}
+
+// ResetExpiresAt resets all changes to the "expires_at" field.
+func (m *AccessRequestMutation) ResetExpiresAt() {
+	m.expires_at = nil
+}
+
+// SetApprovedByID sets the "approved_by_id" field.
+func (m *AccessRequestMutation) SetApprovedByID(u uuid.UUID) {
+	m.approved_by_id = &u
+}
+
+// ApprovedByID returns the value of the "approved_by_id" field in the mutation.
+func (m *AccessRequestMutation) ApprovedByID() (r uuid.UUID, exists bool) {
+	v := m.approved_by_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldApprovedByID returns the old "approved_by_id" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldApprovedByID(ctx context.Context) (v *uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldApprovedByID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldApprovedByID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldApprovedByID: %w", err)
+	}
+	return oldValue.ApprovedByID, nil
+}
+
+// ClearApprovedByID clears the value of the "approved_by_id" field.
+func (m *AccessRequestMutation) ClearApprovedByID() {
+	m.approved_by_id = nil
+	m.clearedFields[accessrequest.FieldApprovedByID] = struct{}{}
+}
+
+// ApprovedByIDCleared returns if the "approved_by_id" field was cleared in this mutation.
+func (m *AccessRequestMutation) ApprovedByIDCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldApprovedByID]
+	return ok
+}
+
+// ResetApprovedByID resets all changes to the "approved_by_id" field.
+func (m *AccessRequestMutation) ResetApprovedByID() {
+	m.approved_by_id = nil
+	delete(m.clearedFields, accessrequest.FieldApprovedByID)
+}
+
+// SetApprovedAt sets the "approved_at" field.
+func (m *AccessRequestMutation) SetApprovedAt(t time.Time) {
+	m.approved_at = &t
+}
+
+// ApprovedAt returns the value of the "approved_at" field in the mutation.
+func (m *AccessRequestMutation) ApprovedAt() (r time.Time, exists bool) {
+	v := m.approved_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldApprovedAt returns the old "approved_at" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldApprovedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldApprovedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldApprovedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldApprovedAt: %w", err)
+	}
+	return oldValue.ApprovedAt, nil
+}
+
+// ClearApprovedAt clears the value of the "approved_at" field.
+func (m *AccessRequestMutation) ClearApprovedAt() {
+	m.approved_at = nil
+	m.clearedFields[accessrequest.FieldApprovedAt] = struct{}{}
+}
+
+// ApprovedAtCleared returns if the "approved_at" field was cleared in this mutation.
+func (m *AccessRequestMutation) ApprovedAtCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldApprovedAt]
+	return ok
+}
+
+// ResetApprovedAt resets all changes to the "approved_at" field.
+func (m *AccessRequestMutation) ResetApprovedAt() {
+	m.approved_at = nil
+	delete(m.clearedFields, accessrequest.FieldApprovedAt)
+}
+
+// SetRejectedByID sets the "rejected_by_id" field.
+func (m *AccessRequestMutation) SetRejectedByID(u uuid.UUID) {
+	m.rejected_by_id = &u
+}
+
+// RejectedByID returns the value of the "rejected_by_id" field in the mutation.
+func (m *AccessRequestMutation) RejectedByID() (r uuid.UUID, exists bool) {
+	v := m.rejected_by_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRejectedByID returns the old "rejected_by_id" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldRejectedByID(ctx context.Context) (v *uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRejectedByID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRejectedByID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRejectedByID: %w", err)
+	}
+	return oldValue.RejectedByID, nil
+}
+
+// ClearRejectedByID clears the value of the "rejected_by_id" field.
+func (m *AccessRequestMutation) ClearRejectedByID() {
+	m.rejected_by_id = nil
+	m.clearedFields[accessrequest.FieldRejectedByID] = struct{}{}
+}
+
+// RejectedByIDCleared returns if the "rejected_by_id" field was cleared in this mutation.
+func (m *AccessRequestMutation) RejectedByIDCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldRejectedByID]
+	return ok
+}
+
+// ResetRejectedByID resets all changes to the "rejected_by_id" field.
+func (m *AccessRequestMutation) ResetRejectedByID() {
+	m.rejected_by_id = nil
+	delete(m.clearedFields, accessrequest.FieldRejectedByID)
+}
+
+// SetRejectionReason sets the "rejection_reason" field.
+func (m *AccessRequestMutation) SetRejectionReason(s string) {
+	m.rejection_reason = &s
+}
+
+// RejectionReason returns the value of the "rejection_reason" field in the mutation.
+func (m *AccessRequestMutation) RejectionReason() (r string, exists bool) {
+	v := m.rejection_reason
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRejectionReason returns the old "rejection_reason" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldRejectionReason(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRejectionReason is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRejectionReason requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRejectionReason: %w", err)
+	}
+	return oldValue.RejectionReason, nil
+}
+
+// ClearRejectionReason clears the value of the "rejection_reason" field.
+func (m *AccessRequestMutation) ClearRejectionReason() {
+	m.rejection_reason = nil
+	m.clearedFields[accessrequest.FieldRejectionReason] = struct{}{}
+}
+
+// RejectionReasonCleared returns if the "rejection_reason" field was cleared in this mutation.
+func (m *AccessRequestMutation) RejectionReasonCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldRejectionReason]
+	return ok
+}
+
+// ResetRejectionReason resets all changes to the "rejection_reason" field.
+func (m *AccessRequestMutation) ResetRejectionReason() {
+	m.rejection_reason = nil
+	delete(m.clearedFields, accessrequest.FieldRejectionReason)
+}
+
+// SetRejectedAt sets the "rejected_at" field.
+func (m *AccessRequestMutation) SetRejectedAt(t time.Time) {
+	m.rejected_at = &t
+}
+
+// RejectedAt returns the value of the "rejected_at" field in the mutation.
+func (m *AccessRequestMutation) RejectedAt() (r time.Time, exists bool) {
+	v := m.rejected_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRejectedAt returns the old "rejected_at" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldRejectedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRejectedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRejectedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRejectedAt: %w", err)
+	}
+	return oldValue.RejectedAt, nil
+}
+
+// ClearRejectedAt clears the value of the "rejected_at" field.
+func (m *AccessRequestMutation) ClearRejectedAt() {
+	m.rejected_at = nil
+	m.clearedFields[accessrequest.FieldRejectedAt] = struct{}{}
+}
+
+// RejectedAtCleared returns if the "rejected_at" field was cleared in this mutation.
+func (m *AccessRequestMutation) RejectedAtCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldRejectedAt]
+	return ok
+}
+
+// ResetRejectedAt resets all changes to the "rejected_at" field.
+func (m *AccessRequestMutation) ResetRejectedAt() {
+	m.rejected_at = nil
+	delete(m.clearedFields, accessrequest.FieldRejectedAt)
+}
+
+// SetCancelledAt sets the "cancelled_at" field.
+func (m *AccessRequestMutation) SetCancelledAt(t time.Time) {
+	m.cancelled_at = &t
+}
+
+// CancelledAt returns the value of the "cancelled_at" field in the mutation.
+func (m *AccessRequestMutation) CancelledAt() (r time.Time, exists bool) {
+	v := m.cancelled_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCancelledAt returns the old "cancelled_at" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldCancelledAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCancelledAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCancelledAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCancelledAt: %w", err)
+	}
+	return oldValue.CancelledAt, nil
+}
+
+// ClearCancelledAt clears the value of the "cancelled_at" field.
+func (m *AccessRequestMutation) ClearCancelledAt() {
+	m.cancelled_at = nil
+	m.clearedFields[accessrequest.FieldCancelledAt] = struct{}{}
+}
+
+// CancelledAtCleared returns if the "cancelled_at" field was cleared in this mutation.
+func (m *AccessRequestMutation) CancelledAtCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldCancelledAt]
+	return ok
+}
+
+// ResetCancelledAt resets all changes to the "cancelled_at" field.
+func (m *AccessRequestMutation) ResetCancelledAt() {
+	m.cancelled_at = nil
+	delete(m.clearedFields, accessrequest.FieldCancelledAt)
+}
+
+// SetSupportGrantID sets the "support_grant_id" field.
+func (m *AccessRequestMutation) SetSupportGrantID(u uuid.UUID) {
+	m.support_grant_id = &u
+}
+
+// SupportGrantID returns the value of the "support_grant_id" field in the mutation.
+func (m *AccessRequestMutation) SupportGrantID() (r uuid.UUID, exists bool) {
+	v := m.support_grant_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSupportGrantID returns the old "support_grant_id" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldSupportGrantID(ctx context.Context) (v *uuid.UUID, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSupportGrantID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSupportGrantID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSupportGrantID: %w", err)
+	}
+	return oldValue.SupportGrantID, nil
+}
+
+// ClearSupportGrantID clears the value of the "support_grant_id" field.
+func (m *AccessRequestMutation) ClearSupportGrantID() {
+	m.support_grant_id = nil
+	m.clearedFields[accessrequest.FieldSupportGrantID] = struct{}{}
+}
+
+// SupportGrantIDCleared returns if the "support_grant_id" field was cleared in this mutation.
+func (m *AccessRequestMutation) SupportGrantIDCleared() bool {
+	_, ok := m.clearedFields[accessrequest.FieldSupportGrantID]
+	return ok
+}
+
+// ResetSupportGrantID resets all changes to the "support_grant_id" field.
+func (m *AccessRequestMutation) ResetSupportGrantID() {
+	m.support_grant_id = nil
+	delete(m.clearedFields, accessrequest.FieldSupportGrantID)
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *AccessRequestMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *AccessRequestMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the AccessRequest entity.
+// If the AccessRequest object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *AccessRequestMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *AccessRequestMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// Where appends a list predicates to the AccessRequestMutation builder.
+func (m *AccessRequestMutation) Where(ps ...predicate.AccessRequest) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the AccessRequestMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *AccessRequestMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.AccessRequest, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *AccessRequestMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *AccessRequestMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (AccessRequest).
+func (m *AccessRequestMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *AccessRequestMutation) Fields() []string {
+	fields := make([]string, 0, 20)
+	if m.institution_id != nil {
+		fields = append(fields, accessrequest.FieldInstitutionID)
+	}
+	if m.requester_id != nil {
+		fields = append(fields, accessrequest.FieldRequesterID)
+	}
+	if m.target_service != nil {
+		fields = append(fields, accessrequest.FieldTargetService)
+	}
+	if m.reason != nil {
+		fields = append(fields, accessrequest.FieldReason)
+	}
+	if m.requested_duration_minutes != nil {
+		fields = append(fields, accessrequest.FieldRequestedDurationMinutes)
+	}
+	if m.approved_duration_minutes != nil {
+		fields = append(fields, accessrequest.FieldApprovedDurationMinutes)
+	}
+	if m.requested_scope != nil {
+		fields = append(fields, accessrequest.FieldRequestedScope)
+	}
+	if m.approved_scope != nil {
+		fields = append(fields, accessrequest.FieldApprovedScope)
+	}
+	if m.requested_ips != nil {
+		fields = append(fields, accessrequest.FieldRequestedIps)
+	}
+	if m.approved_ips != nil {
+		fields = append(fields, accessrequest.FieldApprovedIps)
+	}
+	if m.status != nil {
+		fields = append(fields, accessrequest.FieldStatus)
+	}
+	if m.expires_at != nil {
+		fields = append(fields, accessrequest.FieldExpiresAt)
+	}
+	if m.approved_by_id != nil {
+		fields = append(fields, accessrequest.FieldApprovedByID)
+	}
+	if m.approved_at != nil {
+		fields = append(fields, accessrequest.FieldApprovedAt)
+	}
+	if m.rejected_by_id != nil {
+		fields = append(fields, accessrequest.FieldRejectedByID)
+	}
+	if m.rejection_reason != nil {
+		fields = append(fields, accessrequest.FieldRejectionReason)
+	}
+	if m.rejected_at != nil {
+		fields = append(fields, accessrequest.FieldRejectedAt)
+	}
+	if m.cancelled_at != nil {
+		fields = append(fields, accessrequest.FieldCancelledAt)
+	}
+	if m.support_grant_id != nil {
+		fields = append(fields, accessrequest.FieldSupportGrantID)
+	}
+	if m.created_at != nil {
+		fields = append(fields, accessrequest.FieldCreatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *AccessRequestMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case accessrequest.FieldInstitutionID:
+		return m.InstitutionID()
+	case accessrequest.FieldRequesterID:
+		return m.RequesterID()
+	case accessrequest.FieldTargetService:
+		return m.TargetService()
+	case accessrequest.FieldReason:
+		return m.Reason()
+	case accessrequest.FieldRequestedDurationMinutes:
+		return m.RequestedDurationMinutes()
+	case accessrequest.FieldApprovedDurationMinutes:
+		return m.ApprovedDurationMinutes()
+	case accessrequest.FieldRequestedScope:
+		return m.RequestedScope()
+	case accessrequest.FieldApprovedScope:
+		return m.ApprovedScope()
+	case accessrequest.FieldRequestedIps:
+		return m.RequestedIps()
+	case accessrequest.FieldApprovedIps:
+		return m.ApprovedIps()
+	case accessrequest.FieldStatus:
+		return m.Status()
+	case accessrequest.FieldExpiresAt:
+		return m.ExpiresAt()
+	case accessrequest.FieldApprovedByID:
+		return m.ApprovedByID()
+	case accessrequest.FieldApprovedAt:
+		return m.ApprovedAt()
+	case accessrequest.FieldRejectedByID:
+		return m.RejectedByID()
+	case accessrequest.FieldRejectionReason:
+		return m.RejectionReason()
+	case accessrequest.FieldRejectedAt:
+		return m.RejectedAt()
+	case accessrequest.FieldCancelledAt:
+		return m.CancelledAt()
+	case accessrequest.FieldSupportGrantID:
+		return m.SupportGrantID()
+	case accessrequest.FieldCreatedAt:
+		return m.CreatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *AccessRequestMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case accessrequest.FieldInstitutionID:
+		return m.OldInstitutionID(ctx)
+	case accessrequest.FieldRequesterID:
+		return m.OldRequesterID(ctx)
+	case accessrequest.FieldTargetService:
+		return m.OldTargetService(ctx)
+	case accessrequest.FieldReason:
+		return m.OldReason(ctx)
+	case accessrequest.FieldRequestedDurationMinutes:
+		return m.OldRequestedDurationMinutes(ctx)
+	case accessrequest.FieldApprovedDurationMinutes:
+		return m.OldApprovedDurationMinutes(ctx)
+	case accessrequest.FieldRequestedScope:
+		return m.OldRequestedScope(ctx)
+	case accessrequest.FieldApprovedScope:
+		return m.OldApprovedScope(ctx)
+	case accessrequest.FieldRequestedIps:
+		return m.OldRequestedIps(ctx)
+	case accessrequest.FieldApprovedIps:
+		return m.OldApprovedIps(ctx)
+	case accessrequest.FieldStatus:
+		return m.OldStatus(ctx)
+	case accessrequest.FieldExpiresAt:
+		return m.OldExpiresAt(ctx)
+	case accessrequest.FieldApprovedByID:
+		return m.OldApprovedByID(ctx)
+	case accessrequest.FieldApprovedAt:
+		return m.OldApprovedAt(ctx)
+	case accessrequest.FieldRejectedByID:
+		return m.OldRejectedByID(ctx)
+	case accessrequest.FieldRejectionReason:
+		return m.OldRejectionReason(ctx)
+	case accessrequest.FieldRejectedAt:
+		return m.OldRejectedAt(ctx)
+	case accessrequest.FieldCancelledAt:
+		return m.OldCancelledAt(ctx)
+	case accessrequest.FieldSupportGrantID:
+		return m.OldSupportGrantID(ctx)
+	case accessrequest.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown AccessRequest field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AccessRequestMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case accessrequest.FieldInstitutionID:
+		v, ok := value.(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInstitutionID(v)
+		return nil
+	case accessrequest.FieldRequesterID:
+		v, ok := value.(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequesterID(v)
+		return nil
+	case accessrequest.FieldTargetService:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTargetService(v)
+		return nil
+	case accessrequest.FieldReason:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReason(v)
+		return nil
+	case accessrequest.FieldRequestedDurationMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestedDurationMinutes(v)
+		return nil
+	case accessrequest.FieldApprovedDurationMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetApprovedDurationMinutes(v)
+		return nil
+	case accessrequest.FieldRequestedScope:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestedScope(v)
+		return nil
+	case accessrequest.FieldApprovedScope:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetApprovedScope(v)
+		return nil
+	case accessrequest.FieldRequestedIps:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestedIps(v)
+		return nil
+	case accessrequest.FieldApprovedIps:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetApprovedIps(v)
+		return nil
+	case accessrequest.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case accessrequest.FieldExpiresAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExpiresAt(v)
+		return nil
+	case accessrequest.FieldApprovedByID:
+		v, ok := value.(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetApprovedByID(v)
+		return nil
+	case accessrequest.FieldApprovedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetApprovedAt(v)
+		return nil
+	case accessrequest.FieldRejectedByID:
+		v, ok := value.(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRejectedByID(v)
+		return nil
+	case accessrequest.FieldRejectionReason:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRejectionReason(v)
+		return nil
+	case accessrequest.FieldRejectedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRejectedAt(v)
+		return nil
+	case accessrequest.FieldCancelledAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCancelledAt(v)
+		return nil
+	case accessrequest.FieldSupportGrantID:
+		v, ok := value.(uuid.UUID)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSupportGrantID(v)
+		return nil
+	case accessrequest.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AccessRequest field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *AccessRequestMutation) AddedFields() []string {
+	var fields []string
+	if m.addrequested_duration_minutes != nil {
+		fields = append(fields, accessrequest.FieldRequestedDurationMinutes)
+	}
+	if m.addapproved_duration_minutes != nil {
+		fields = append(fields, accessrequest.FieldApprovedDurationMinutes)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *AccessRequestMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case accessrequest.FieldRequestedDurationMinutes:
+		return m.AddedRequestedDurationMinutes()
+	case accessrequest.FieldApprovedDurationMinutes:
+		return m.AddedApprovedDurationMinutes()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *AccessRequestMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case accessrequest.FieldRequestedDurationMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddRequestedDurationMinutes(v)
+		return nil
+	case accessrequest.FieldApprovedDurationMinutes:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddApprovedDurationMinutes(v)
+		return nil
+	}
+	return fmt.Errorf("unknown AccessRequest numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *AccessRequestMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(accessrequest.FieldTargetService) {
+		fields = append(fields, accessrequest.FieldTargetService)
+	}
+	if m.FieldCleared(accessrequest.FieldApprovedDurationMinutes) {
+		fields = append(fields, accessrequest.FieldApprovedDurationMinutes)
+	}
+	if m.FieldCleared(accessrequest.FieldApprovedScope) {
+		fields = append(fields, accessrequest.FieldApprovedScope)
+	}
+	if m.FieldCleared(accessrequest.FieldRequestedIps) {
+		fields = append(fields, accessrequest.FieldRequestedIps)
+	}
+	if m.FieldCleared(accessrequest.FieldApprovedIps) {
+		fields = append(fields, accessrequest.FieldApprovedIps)
+	}
+	if m.FieldCleared(accessrequest.FieldApprovedByID) {
+		fields = append(fields, accessrequest.FieldApprovedByID)
+	}
+	if m.FieldCleared(accessrequest.FieldApprovedAt) {
+		fields = append(fields, accessrequest.FieldApprovedAt)
+	}
+	if m.FieldCleared(accessrequest.FieldRejectedByID) {
+		fields = append(fields, accessrequest.FieldRejectedByID)
+	}
+	if m.FieldCleared(accessrequest.FieldRejectionReason) {
+		fields = append(fields, accessrequest.FieldRejectionReason)
+	}
+	if m.FieldCleared(accessrequest.FieldRejectedAt) {
+		fields = append(fields, accessrequest.FieldRejectedAt)
+	}
+	if m.FieldCleared(accessrequest.FieldCancelledAt) {
+		fields = append(fields, accessrequest.FieldCancelledAt)
+	}
+	if m.FieldCleared(accessrequest.FieldSupportGrantID) {
+		fields = append(fields, accessrequest.FieldSupportGrantID)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *AccessRequestMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *AccessRequestMutation) ClearField(name string) error {
+	switch name {
+	case accessrequest.FieldTargetService:
+		m.ClearTargetService()
+		return nil
+	case accessrequest.FieldApprovedDurationMinutes:
+		m.ClearApprovedDurationMinutes()
+		return nil
+	case accessrequest.FieldApprovedScope:
+		m.ClearApprovedScope()
+		return nil
+	case accessrequest.FieldRequestedIps:
+		m.ClearRequestedIps()
+		return nil
+	case accessrequest.FieldApprovedIps:
+		m.ClearApprovedIps()
+		return nil
+	case accessrequest.FieldApprovedByID:
+		m.ClearApprovedByID()
+		return nil
+	case accessrequest.FieldApprovedAt:
+		m.ClearApprovedAt()
+		return nil
+	case accessrequest.FieldRejectedByID:
+		m.ClearRejectedByID()
+		return nil
+	case accessrequest.FieldRejectionReason:
+		m.ClearRejectionReason()
+		return nil
+	case accessrequest.FieldRejectedAt:
+		m.ClearRejectedAt()
+		return nil
+	case accessrequest.FieldCancelledAt:
+		m.ClearCancelledAt()
+		return nil
+	case accessrequest.FieldSupportGrantID:
+		m.ClearSupportGrantID()
+		return nil
+	}
+	return fmt.Errorf("unknown AccessRequest nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *AccessRequestMutation) ResetField(name string) error {
+	switch name {
+	case accessrequest.FieldInstitutionID:
+		m.ResetInstitutionID()
+		return nil
+	case accessrequest.FieldRequesterID:
+		m.ResetRequesterID()
+		return nil
+	case accessrequest.FieldTargetService:
+		m.ResetTargetService()
+		return nil
+	case accessrequest.FieldReason:
+		m.ResetReason()
+		return nil
+	case accessrequest.FieldRequestedDurationMinutes:
+		m.ResetRequestedDurationMinutes()
+		return nil
+	case accessrequest.FieldApprovedDurationMinutes:
+		m.ResetApprovedDurationMinutes()
+		return nil
+	case accessrequest.FieldRequestedScope:
+		m.ResetRequestedScope()
+		return nil
+	case accessrequest.FieldApprovedScope:
+		m.ResetApprovedScope()
+		return nil
+	case accessrequest.FieldRequestedIps:
+		m.ResetRequestedIps()
+		return nil
+	case accessrequest.FieldApprovedIps:
+		m.ResetApprovedIps()
+		return nil
+	case accessrequest.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case accessrequest.FieldExpiresAt:
+		m.ResetExpiresAt()
+		return nil
+	case accessrequest.FieldApprovedByID:
+		m.ResetApprovedByID()
+		return nil
+	case accessrequest.FieldApprovedAt:
+		m.ResetApprovedAt()
+		return nil
+	case accessrequest.FieldRejectedByID:
+		m.ResetRejectedByID()
+		return nil
+	case accessrequest.FieldRejectionReason:
+		m.ResetRejectionReason()
+		return nil
+	case accessrequest.FieldRejectedAt:
+		m.ResetRejectedAt()
+		return nil
+	case accessrequest.FieldCancelledAt:
+		m.ResetCancelledAt()
+		return nil
+	case accessrequest.FieldSupportGrantID:
+		m.ResetSupportGrantID()
+		return nil
+	case accessrequest.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown AccessRequest field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *AccessRequestMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *AccessRequestMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *AccessRequestMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *AccessRequestMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *AccessRequestMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *AccessRequestMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *AccessRequestMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown AccessRequest unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *AccessRequestMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown AccessRequest edge %s", name)
+}
 
 // AuditEventMutation represents an operation that mutates the AuditEvent nodes in the graph.
 type AuditEventMutation struct {
@@ -41,7 +1736,6 @@ type AuditEventMutation struct {
 	event_type     *string
 	description    *string
 	hash_chain     *string
-	signature      *string
 	created_at     *time.Time
 	clearedFields  map[string]struct{}
 	done           bool
@@ -359,55 +2053,6 @@ func (m *AuditEventMutation) ResetHashChain() {
 	delete(m.clearedFields, auditevent.FieldHashChain)
 }
 
-// SetSignature sets the "signature" field.
-func (m *AuditEventMutation) SetSignature(s string) {
-	m.signature = &s
-}
-
-// Signature returns the value of the "signature" field in the mutation.
-func (m *AuditEventMutation) Signature() (r string, exists bool) {
-	v := m.signature
-	if v == nil {
-		return
-	}
-	return *v, true
-}
-
-// OldSignature returns the old "signature" field's value of the AuditEvent entity.
-// If the AuditEvent object wasn't provided to the builder, the object is fetched from the database.
-// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *AuditEventMutation) OldSignature(ctx context.Context) (v string, err error) {
-	if !m.op.Is(OpUpdateOne) {
-		return v, errors.New("OldSignature is only allowed on UpdateOne operations")
-	}
-	if m.id == nil || m.oldValue == nil {
-		return v, errors.New("OldSignature requires an ID field in the mutation")
-	}
-	oldValue, err := m.oldValue(ctx)
-	if err != nil {
-		return v, fmt.Errorf("querying old value for OldSignature: %w", err)
-	}
-	return oldValue.Signature, nil
-}
-
-// ClearSignature clears the value of the "signature" field.
-func (m *AuditEventMutation) ClearSignature() {
-	m.signature = nil
-	m.clearedFields[auditevent.FieldSignature] = struct{}{}
-}
-
-// SignatureCleared returns if the "signature" field was cleared in this mutation.
-func (m *AuditEventMutation) SignatureCleared() bool {
-	_, ok := m.clearedFields[auditevent.FieldSignature]
-	return ok
-}
-
-// ResetSignature resets all changes to the "signature" field.
-func (m *AuditEventMutation) ResetSignature() {
-	m.signature = nil
-	delete(m.clearedFields, auditevent.FieldSignature)
-}
-
 // SetCreatedAt sets the "created_at" field.
 func (m *AuditEventMutation) SetCreatedAt(t time.Time) {
 	m.created_at = &t
@@ -478,7 +2123,7 @@ func (m *AuditEventMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *AuditEventMutation) Fields() []string {
-	fields := make([]string, 0, 7)
+	fields := make([]string, 0, 6)
 	if m.institution_id != nil {
 		fields = append(fields, auditevent.FieldInstitutionID)
 	}
@@ -493,9 +2138,6 @@ func (m *AuditEventMutation) Fields() []string {
 	}
 	if m.hash_chain != nil {
 		fields = append(fields, auditevent.FieldHashChain)
-	}
-	if m.signature != nil {
-		fields = append(fields, auditevent.FieldSignature)
 	}
 	if m.created_at != nil {
 		fields = append(fields, auditevent.FieldCreatedAt)
@@ -518,8 +2160,6 @@ func (m *AuditEventMutation) Field(name string) (ent.Value, bool) {
 		return m.Description()
 	case auditevent.FieldHashChain:
 		return m.HashChain()
-	case auditevent.FieldSignature:
-		return m.Signature()
 	case auditevent.FieldCreatedAt:
 		return m.CreatedAt()
 	}
@@ -541,8 +2181,6 @@ func (m *AuditEventMutation) OldField(ctx context.Context, name string) (ent.Val
 		return m.OldDescription(ctx)
 	case auditevent.FieldHashChain:
 		return m.OldHashChain(ctx)
-	case auditevent.FieldSignature:
-		return m.OldSignature(ctx)
 	case auditevent.FieldCreatedAt:
 		return m.OldCreatedAt(ctx)
 	}
@@ -589,13 +2227,6 @@ func (m *AuditEventMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetHashChain(v)
 		return nil
-	case auditevent.FieldSignature:
-		v, ok := value.(string)
-		if !ok {
-			return fmt.Errorf("unexpected type %T for field %s", value, name)
-		}
-		m.SetSignature(v)
-		return nil
 	case auditevent.FieldCreatedAt:
 		v, ok := value.(time.Time)
 		if !ok {
@@ -639,9 +2270,6 @@ func (m *AuditEventMutation) ClearedFields() []string {
 	if m.FieldCleared(auditevent.FieldHashChain) {
 		fields = append(fields, auditevent.FieldHashChain)
 	}
-	if m.FieldCleared(auditevent.FieldSignature) {
-		fields = append(fields, auditevent.FieldSignature)
-	}
 	return fields
 }
 
@@ -661,9 +2289,6 @@ func (m *AuditEventMutation) ClearField(name string) error {
 		return nil
 	case auditevent.FieldHashChain:
 		m.ClearHashChain()
-		return nil
-	case auditevent.FieldSignature:
-		m.ClearSignature()
 		return nil
 	}
 	return fmt.Errorf("unknown AuditEvent nullable field %s", name)
@@ -687,9 +2312,6 @@ func (m *AuditEventMutation) ResetField(name string) error {
 		return nil
 	case auditevent.FieldHashChain:
 		m.ResetHashChain()
-		return nil
-	case auditevent.FieldSignature:
-		m.ResetSignature()
 		return nil
 	case auditevent.FieldCreatedAt:
 		m.ResetCreatedAt()

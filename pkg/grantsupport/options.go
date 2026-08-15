@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"github.com/redis/go-redis/v9"
 
 	"grantsupport/ent"
 	"grantsupport/pkg/ports"
@@ -15,6 +16,7 @@ type EngineConfig struct {
 	SQLDB           *sql.DB
 	Dialect         string
 	EntClient       *ent.Client
+	RedisClient     *redis.Client
 	LockStore       ports.LockStore
 	ReplayStore     ports.ReplayStore
 	RevocationStore ports.RevocationStore
@@ -113,5 +115,12 @@ func WithAutoMigrate(enable bool) Option {
 func WithEnvironment(env string) Option {
 	return func(c *EngineConfig) {
 		c.Environment = env
+	}
+}
+
+// WithRedisClient configures an optional Valkey/Redis client for readiness health checking.
+func WithRedisClient(client *redis.Client) Option {
+	return func(c *EngineConfig) {
+		c.RedisClient = client
 	}
 }
