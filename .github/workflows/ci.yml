@@ -105,7 +105,7 @@ jobs:
           TEST_MYSQL_URL: grantsupport:secretpassword@tcp(localhost:3306)/grantsupport?parseTime=true
           TEST_MARIADB_URL: grantsupport:secretpassword@tcp(localhost:3307)/grantsupport?parseTime=true
           VALKEY_CACHE_URL: valkey://localhost:6379/0
-        run: go test -v -count=1 ./...
+        run: go test -count=1 ./...
 
       - name: Race Detection Suite (go test -race)
         env:
@@ -113,7 +113,7 @@ jobs:
           TEST_MYSQL_URL: grantsupport:secretpassword@tcp(localhost:3306)/grantsupport?parseTime=true
           TEST_MARIADB_URL: grantsupport:secretpassword@tcp(localhost:3307)/grantsupport?parseTime=true
           VALKEY_CACHE_URL: valkey://localhost:6379/0
-        run: go test -v -race -count=1 ./...
+        run: go test -race -count=1 ./...
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
