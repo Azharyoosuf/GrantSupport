@@ -21,4 +21,4 @@ Describe the tests you ran to verify your changes. Include terminal command outp
 - [ ] My code follows the repository style and Go idioms.
 - [ ] I have not introduced any telemetry, phone-home, or remote tracking mechanisms.
 - [ ] I have not weakened any fail-closed security behaviors.
-- [ ] I agree that my contributions are licensed under AGPL-3.0-only.
+- [ ] I agree that my contributions are licensed under the MIT License.
