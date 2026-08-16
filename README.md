@@ -2,7 +2,7 @@
 
 **Stop sharing admin passwords with support teams — audited, revocable, time-boxed support access through a standard HTTP API.**
 
-[![License: AGPL 3.0](https://img.shields.io/badge/License-AGPL_3.0-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version: v0.1.0-beta.3](https://img.shields.io/badge/Version-v0.1.0--beta.3-orange.svg)](CHANGELOG.md)
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1.0-green.svg)](api/openapi.yaml)
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](go.mod)
@@ -43,7 +43,7 @@ To maintain a strict security boundary and operational simplicity, GrantSupport 
 
 * **Status**: Beta / Active Development
 * **Current Release**: `v0.1.0-beta.3`
-* **License**: GNU Affero General Public License v3.0 (`AGPL-3.0-only`)
+* **License**: MIT License (`MIT`)
 * **Deployment**: 100% Self-Hosted (No external accounts or cloud dependencies required)
 * **Telemetry**: None (Zero telemetry, zero phone-home, zero heartbeat pings)
 * **Databases Supported**: PostgreSQL 16+, MySQL 8.0+, MariaDB 10.5+, SQLite 3
@@ -222,7 +222,7 @@ For full technical specifications, see [`docs/SECURITY_MODEL.md`](docs/SECURITY_
 
 ## 11. License
 
-GrantSupport is licensed under the **[GNU Affero General Public License version 3.0 (AGPL-3.0-only)](LICENSE)**.
+GrantSupport is open-source software licensed under the **[MIT License](LICENSE)**.
 
 ---
 

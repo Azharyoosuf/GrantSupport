@@ -50,10 +50,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.0-beta.1] - 2026-08-15
 
-### Initial Public Beta Release (AGPL-3.0-only)
+### Initial Public Beta Release (MIT)
 
 #### Community & Open-Source Relicensing
-- **Relicensed to AGPL-3.0-only**: Formally transitioned GrantSupport to the GNU Affero General Public License version 3.0 as a pure open-source, community-driven project.
+- **Relicensed to MIT**: Formally transitioned GrantSupport to the permissive MIT License as a pure open-source, community-driven project.
 - **Removed Commercial Model Artifacts**: Completely eliminated all commercial licensing parameters, BSL limits, and subscription documentation.
 - **Added Community Assets**: Introduced Contributor Covenant Code of Conduct, GitHub issue templates for bug reports and feature requests, and pull request verification templates.
 

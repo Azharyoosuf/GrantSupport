@@ -7,8 +7,8 @@ info:
     It enables multi-tenant SaaS applications to issue cryptographically signed, time-bounded,
     single-use support access tokens to vendor support agents with tamper-evident audit logging.
   license:
-    name: AGPL-3.0-only
-    url: https://www.gnu.org/licenses/agpl-3.0.html
+    name: MIT
+    url: https://opensource.org/licenses/MIT
 
 servers:
   - url: https://api.grantsupport.local/v1

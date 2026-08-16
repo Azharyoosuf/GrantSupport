@@ -37,4 +37,4 @@ If you discover a security vulnerability:
 
 ## 4. Scope of Support
 
-GrantSupport is 100% self-hosted, open-source software licensed under the GNU AGPLv3. Maintenance and community support are provided on a best-effort basis by repository maintainers and contributors.
+GrantSupport is 100% self-hosted, open-source software licensed under the **[MIT License](LICENSE)**. Maintenance and community support are provided on a best-effort basis by repository maintainers and contributors.

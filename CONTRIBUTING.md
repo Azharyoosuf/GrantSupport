@@ -1,6 +1,6 @@
 # Contributing to GrantSupport
 
-Thank you for your interest in contributing to GrantSupport! GrantSupport is a community-driven, open-source security engine licensed under the **GNU Affero General Public License version 3.0 (AGPL-3.0-only)**.
+Thank you for your interest in contributing to GrantSupport! GrantSupport is a community-driven, open-source security engine licensed under the **[MIT License](LICENSE)**.
 
 We welcome bug reports, security disclosures, documentation improvements, and pull requests.
 
@@ -90,4 +90,4 @@ When proposing code changes to GrantSupport:
 
 ## License Agreement
 
-By contributing to GrantSupport, you agree that your contributions will be licensed under the **GNU Affero General Public License version 3.0 (AGPL-3.0-only)** as stated in the [`LICENSE`](LICENSE) file.
+By contributing to GrantSupport, you agree that your contributions will be licensed under the **[MIT License](LICENSE)** as stated in the [`LICENSE`](LICENSE) file.
