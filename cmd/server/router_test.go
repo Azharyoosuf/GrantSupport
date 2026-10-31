@@ -684,6 +684,29 @@ func TestValkeyCacheURLUnsetDoesNotDialLocalValkey(t *testing.T) {
 	}
 }
 
+func scrapeMetricInt(t *testing.T, handler http.Handler, series string) int64 {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:9090"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /metrics, got %d", rec.Code)
+	}
+	prefix := series + " "
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if strings.HasPrefix(line, prefix) {
+			valStr := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			var v int64
+			if _, err := fmt.Sscanf(valStr, "%d", &v); err != nil {
+				t.Fatalf("failed to parse metric value from line %q: %v", line, err)
+			}
+			return v
+		}
+	}
+	return 0
+}
+
 func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 	if err := security.SetupTestRSAKeys(); err != nil {
 		t.Fatalf("SetupTestRSAKeys failed: %v", err)
@@ -704,7 +727,13 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 				t.Fatalf("GenerateJWT failed: %v", err)
 			}
 
-			// 1. Create a support grant via HTTP POST /api/v1/auth/support/grant
+			// Baseline before any operations
+			grantsBefore := scrapeMetricInt(t, handler, `grantsupport_grants_created_total`)
+			loginSuccessBefore := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="success"}`)
+			loginFailureBefore := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="failure"}`)
+			revocationsBefore := scrapeMetricInt(t, handler, `grantsupport_revocations_total{scope="tenant"}`)
+
+			// 1. Create 1 support grant -> assert exact delta of +1 on grantsupport_grants_created_total
 			grantBody, _ := json.Marshal(map[string]any{
 				"durationMinutes": 30,
 				"scope":           "READ_ONLY",
@@ -724,8 +753,11 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 			if err := json.Unmarshal(recGrant.Body.Bytes(), &grantResp); err != nil || grantResp.Token == "" {
 				t.Fatalf("failed to decode grant token: %v", err)
 			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_grants_created_total`) - grantsBefore; got != 1 {
+				t.Fatalf("expected 1 grant creation to add exactly 1 to grantsupport_grants_created_total, got delta=%d", got)
+			}
 
-			// 2. Successful support login via HTTP POST /api/v1/auth/support/login
+			// 2. One successful support login -> assert exact delta of +1 on success and 0 on failure
 			loginBody, _ := json.Marshal(map[string]string{
 				"token":   grantResp.Token,
 				"agentId": agentID.String(),
@@ -738,21 +770,20 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 			if recLogin.Code != http.StatusOK {
 				t.Fatalf("expected 200 OK from /login, got %d: %s", recLogin.Code, recLogin.Body.String())
 			}
-
-			// 3. Scrape /metrics while 1 active session exists
-			reqMetrics1 := httptest.NewRequest(http.MethodGet, "/metrics", nil)
-			reqMetrics1.RemoteAddr = "127.0.0.1:9090"
-			recMetrics1 := httptest.NewRecorder()
-			handler.ServeHTTP(recMetrics1, reqMetrics1)
-			if recMetrics1.Code != http.StatusOK {
-				t.Fatalf("expected 200 OK from /metrics, got %d", recMetrics1.Code)
+			if got := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="success"}`) - loginSuccessBefore; got != 1 {
+				t.Fatalf("expected 1 successful login to add exactly 1 to grantsupport_logins_total{status=\"success\"}, got delta=%d", got)
 			}
-			metricsWhileActive := recMetrics1.Body.String()
-			if !strings.Contains(metricsWhileActive, "grantsupport_active_sessions 1") {
-				t.Fatalf("expected grantsupport_active_sessions 1 while session is active, got:\n%s", metricsWhileActive)
+			if got := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="failure"}`) - loginFailureBefore; got != 0 {
+				t.Fatalf("expected 1 successful login to add 0 to grantsupport_logins_total{status=\"failure\"}, got delta=%d", got)
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_active_sessions`); got != 1 {
+				t.Fatalf("expected grantsupport_active_sessions == 1 while session is active, got %d", got)
 			}
 
-			// 4. Failed support login (reusing single-use token)
+			// 3. One failed support login (reusing single-use token) -> assert exact delta of +1 on failure and 0 on success
+			loginSuccessBeforeFail := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="success"}`)
+			loginFailureBeforeFail := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="failure"}`)
+
 			reqFailedLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
 			reqFailedLogin.RemoteAddr = "198.51.100.22:12345"
 			reqFailedLogin.Header.Set("Content-Type", "application/json")
@@ -761,8 +792,15 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 			if recFailedLogin.Code != http.StatusUnauthorized {
 				t.Fatalf("expected 401 from failed /login, got %d", recFailedLogin.Code)
 			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="failure"}`) - loginFailureBeforeFail; got != 1 {
+				t.Fatalf("expected 1 failed login to add exactly 1 to grantsupport_logins_total{status=\"failure\"}, got delta=%d", got)
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="success"}`) - loginSuccessBeforeFail; got != 0 {
+				t.Fatalf("expected 1 failed login to add 0 to grantsupport_logins_total{status=\"success\"}, got delta=%d", got)
+			}
 
-			// 5. Auth failure (invalid JWT signature on protected endpoint)
+			// 4. Auth failure (invalid JWT signature on protected endpoint) -> assert exact delta of +1
+			authFailBefore := scrapeMetricInt(t, handler, `grantsupport_auth_failures_total{reason="invalid_signature"}`)
 			reqBadAuth := httptest.NewRequest(http.MethodGet, "/api/v1/auth/support/sessions", nil)
 			reqBadAuth.RemoteAddr = "198.51.100.23:12345"
 			reqBadAuth.Header.Set("Authorization", "Bearer invalid.jwt.token")
@@ -771,8 +809,11 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 			if recBadAuth.Code != http.StatusUnauthorized {
 				t.Fatalf("expected 401 from invalid JWT, got %d", recBadAuth.Code)
 			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_auth_failures_total{reason="invalid_signature"}`) - authFailBefore; got != 1 {
+				t.Fatalf("expected 1 invalid JWT request to add exactly 1 to grantsupport_auth_failures_total{reason=\"invalid_signature\"}, got delta=%d", got)
+			}
 
-			// 6. Parameterized route call (/api/v1/auth/support/sessions/{grantId}) to verify low-cardinality route pattern
+			// 5. Parameterized route call (/api/v1/auth/support/sessions/{grantId}) to verify low-cardinality route pattern
 			nonExistentGrantID := uuid.New()
 			reqDelSession := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/support/sessions/"+nonExistentGrantID.String(), nil)
 			reqDelSession.RemoteAddr = "198.51.100.20:12345"
@@ -783,7 +824,7 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 				t.Fatalf("expected 404 from DELETE /sessions/{grantId}, got %d", recDelSession.Code)
 			}
 
-			// 7. Revoke all support grants for the tenant
+			// 6. Revoke all support grants for the tenant -> assert exact delta of +1 on tenant revocations
 			reqRevoke := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/revoke", nil)
 			reqRevoke.RemoteAddr = "198.51.100.20:12345"
 			reqRevoke.Header.Set("Authorization", "Bearer "+adminJWT)
@@ -792,8 +833,12 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 			if recRevoke.Code != http.StatusOK {
 				t.Fatalf("expected 200 OK from /revoke, got %d: %s", recRevoke.Code, recRevoke.Body.String())
 			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_revocations_total{scope="tenant"}`) - revocationsBefore; got != 1 {
+				t.Fatalf("expected 1 revoke call to add exactly 1 to grantsupport_revocations_total{scope=\"tenant\"}, got delta=%d", got)
+			}
 
-			// 8. Rate-limit rejection on /api/v1/auth/support/login (11 requests from same IP)
+			// 7. Rate-limit rejection on /api/v1/auth/support/login (11 requests from same IP -> 1 rate-limit rejection)
+			rlBefore := scrapeMetricInt(t, handler, `grantsupport_rate_limit_exceeded_total{route="/api/v1/auth/support/login"}`)
 			for i := 1; i <= 11; i++ {
 				reqRL := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
 				reqRL.RemoteAddr = "198.51.100.99:54321"
@@ -803,6 +848,9 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 				if i == 11 && recRL.Code != http.StatusTooManyRequests {
 					t.Fatalf("expected 429 on 11th request, got %d", recRL.Code)
 				}
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_rate_limit_exceeded_total{route="/api/v1/auth/support/login"}`) - rlBefore; got != 1 {
+				t.Fatalf("expected 1 rate-limited request to add exactly 1 to grantsupport_rate_limit_exceeded_total, got delta=%d", got)
 			}
 
 			// 9. Scrape /metrics and assert all expected series are non-zero and low-cardinality
