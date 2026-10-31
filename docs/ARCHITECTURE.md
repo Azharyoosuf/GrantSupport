@@ -69,7 +69,7 @@ GrantSupport operates in two primary deployment topologies:
 Implements capability interfaces defined in `pkg/ports/`:
 * **`LockStore`**: `RedisLockStore` (Redlock atomic `SETNX` + Lua release) and `SQLLockStore` (database-level transactional/advisory locking).
 * **`RevocationStore`**: `RedisRevocationStore` (Valkey key-value version cache) and `SQLRevocationStore` (table-backed version query).
-* **`RateLimiterStore`**: `RedisRateLimiter` (atomic Lua token bucket per client IP) and `MemoryRateLimiter` (in-memory sliding window).
+* **`RateLimiterStore`**: `RedisRateLimiter` (atomic fixed-window Lua counter `INCR` + `PEXPIRE` per client IP) and `MemoryRateLimiter` (in-memory per-IP token bucket).
 
 ---
 
@@ -111,20 +111,12 @@ Implements capability interfaces defined in `pkg/ports/`:
 
 ---
 
-## 4. Authentication Mechanisms
-
-### 4.1 Default: RS256 JWT Bearer Authentication
-Standard for the HTTP API:
-* **Asymmetric RS256 Signing**: Tokens are signed using a private RSA key (`JWT_PRIVATE_KEY`) and verified using the corresponding public key (`JWT_PUBLIC_KEY`).
-* **Active Revocation Verification**: The `NewAuthMiddleware` extracts `token_version`, `institution_id`, and `user_id` from JWT claims and queries the `RevocationStore`. If the current version in the store exceeds the JWT's version, the request is rejected with HTTP 401 `TOKEN_REVOKED`.
-
----
-
 ## 4. Authentication, Session Revocation & Key Security
 
-### 4.1 Inbound JWT Bearer Authentication (Standard REST API)
-* **Bearer Validation**: Validates RS256 signatures against public keys in `KeyManager` with `kid` tracking.
-* **Revocation Check**: Queries `RevocationStore.IsTokenRevoked(instID, userID, tokenVersion)` on every request.
+### 4.1 Inbound RS256 JWT Bearer Authentication & Revocation
+Standard for the HTTP API:
+* **Asymmetric RS256 Signing**: Tokens are signed using a private RSA key (`JWT_PRIVATE_KEY`) and verified against public keys in `KeyManager` (`JWT_PUBLIC_KEY`) with `kid` tracking.
+* **Active Revocation Verification**: `NewAuthMiddleware` extracts `token_version`, `institution_id`, and `user_id` from JWT claims and queries `RevocationStore.IsTokenRevoked(instID, userID, tokenVersion)` on every request. If the current version in the store exceeds the JWT's version, the request is rejected with HTTP 401 `TOKEN_REVOKED`.
 * **Fail-Closed Guard**: If the `RevocationStore` is nil or unreachable, the middleware rejects requests with HTTP 503 `REVOCATION_CHECK_UNAVAILABLE`.
 
 ### 4.2 Companion Library: BulletproofAuth (Standalone Repository)
@@ -144,7 +136,7 @@ Event #2 ──► Hash_2 = SHA-256(Hash_1 + Event_2_Data)
 Event #3 ──► Hash_3 = SHA-256(Hash_2 + Event_3_Data)
 ```
 
-* **Sequential Binding**: Each event record stores `previous_hash` and `hash_chain`.
+* **Sequential Binding**: Each event record stores `hash_chain`, computed sequentially over the previous event's `hash_chain` and the current event's canonical payload (`SHA-256(prev_hash_chain || event_data)`).
 * **Tamper Verification**: `engine.VerifyAuditChain(ctx, institutionID)` recalculates all hashes chronologically. If any record was altered, deleted, or inserted out of order, verification fails.
 * **Concurrency Protection**: Per-tenant mutex striping ensures concurrent operations within the same tenant do not interleave hash calculations.
 

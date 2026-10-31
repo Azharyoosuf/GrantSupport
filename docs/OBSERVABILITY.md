@@ -61,7 +61,7 @@ Protect `GET /metrics` in production using one of the following patterns:
 
 ---
 
-## 3. Prometheus Scrape Configuration
+## 4. Prometheus Scrape Configuration
 
 Add the following scrape job to your `prometheus.yml`:
 
@@ -71,13 +71,13 @@ scrape_configs:
     scrape_interval: 15s
     scrape_timeout: 5s
     static_configs:
-      - targets: ['grantsupport-service:8085']
+      - targets: ['grantsupport-service:8080']
     metrics_path: '/metrics'
 ```
 
 ---
 
-## 4. Recommended Alerting Rules
+## 5. Recommended Alerting Rules
 
 ```yaml
 groups:

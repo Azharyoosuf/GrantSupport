@@ -396,7 +396,7 @@ func TestCrossDialectLiveDatabaseUpgrade(t *testing.T) {
 			name:       "postgres",
 			driver:     "pgx",
 			envVar:     "TEST_POSTGRES_URL",
-			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable",
+			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5432/grantsupport?sslmode=disable",
 		},
 		{
 			name:       "mysql",
@@ -830,7 +830,7 @@ func TestSQLMigrationFiles_FullLifecycle(t *testing.T) {
 			name:       "postgres",
 			driver:     "pgx",
 			envVar:     "TEST_POSTGRES_URL",
-			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable",
+			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5432/grantsupport?sslmode=disable",
 		},
 		{
 			name:       "mysql",

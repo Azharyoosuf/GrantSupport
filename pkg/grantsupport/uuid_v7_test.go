@@ -46,7 +46,7 @@ func TestUUIDv7_EntityGenerationLifecycle(t *testing.T) {
 			name:       "PostgreSQL 16",
 			driver:     "pgx",
 			envVar:     "TEST_POSTGRES_URL",
-			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable",
+			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5432/grantsupport?sslmode=disable",
 		},
 		{
 			name:       "MySQL 8.4",

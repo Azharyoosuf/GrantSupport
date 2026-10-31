@@ -146,7 +146,7 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 			name:       "PostgreSQL 16",
 			driver:     "pgx",
 			envVar:     "TEST_POSTGRES_URL",
-			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable",
+			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5432/grantsupport?sslmode=disable",
 		},
 		{
 			name:       "MySQL 8.4",
@@ -610,7 +610,7 @@ func TestDatabaseQueryPlans(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. PostgreSQL EXPLAIN ANALYZE
-	pgDSN := "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable"
+	pgDSN := "postgresql://grantsupport:secretpassword@127.0.0.1:5432/grantsupport?sslmode=disable"
 	pgExplicit := false
 	if env := os.Getenv("TEST_POSTGRES_URL"); env != "" {
 		pgDSN = env

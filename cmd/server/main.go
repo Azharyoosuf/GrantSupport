@@ -148,7 +148,7 @@ func main() {
 
 	port := cfg.Port
 	if port == "" {
-		port = "8085"
+		port = "8080"
 	}
 
 	var serversToShutdown []*http.Server

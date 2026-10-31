@@ -15,7 +15,7 @@ Please be respectful, constructive, and collaborative in all issues, pull reques
 ## Development Setup
 
 ### Prerequisites
-- **Go**: Version `1.22` or later
+- **Go**: Version `1.25+` (see [`go.mod`](go.mod))
 - **Git**
 - **Docker & Docker Compose** (for running PostgreSQL 16+, MySQL 8.0+, MariaDB 10.5+, and Valkey 7.2 test backends)
 - **Make** (optional, for standard build targets)

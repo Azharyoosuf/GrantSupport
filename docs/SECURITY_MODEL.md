@@ -99,6 +99,6 @@ GrantSupport is designed to provide:
 GrantSupport explicitly does **NOT** provide:
 1. **Application-Level Authorization**: GrantSupport embeds the requested `scope` into the JWT, but does not know your application's domain tables or API endpoints. The host application must enforce its own authorization rules.
 2. **Per-Request Ed25519 HTTP Request Signing**: Machine-to-machine Ed25519 request signing (`BulletproofAuth`) is maintained in a separate standalone module ([`github.com/azharyoosuf/bulletproofauth`](https://github.com/azharyoosuf/bulletproofauth)).
-2. **Network Firewalls / DDoS Mitigation**: While GrantSupport provides an IP rate limiter on `/login`, broad volumetric DDoS mitigation must be handled by upstream reverse proxies or WAFs (e.g. Cloudflare, AWS ALB).
-3. **Public Browser CORS API**: GrantSupport is an internal infrastructure service and does not attach permissive CORS headers.
-4. **Agent Background Checks**: GrantSupport relies on the host application to verify the legitimacy of the `agentId` UUID passed during login.
+3. **Network Firewalls / DDoS Mitigation**: While GrantSupport provides an IP rate limiter on `/login`, broad volumetric DDoS mitigation must be handled by upstream reverse proxies or WAFs (e.g. Cloudflare, AWS ALB).
+4. **Public Browser CORS API**: GrantSupport is an internal infrastructure service and does not attach permissive CORS headers.
+5. **Agent Background Checks**: GrantSupport relies on the host application to verify the legitimacy of the `agentId` UUID passed during login.
