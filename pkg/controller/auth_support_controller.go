@@ -1,12 +1,14 @@
 package controller
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"grantsupport/pkg/config"
 	pkgctx "grantsupport/pkg/context"
+	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
 )
@@ -122,6 +124,9 @@ func (c *SupportGrantController) TerminateSession(w http.ResponseWriter, r *http
 		return NewAppError(http.StatusBadRequest, "INVALID_GRANT_ID", "grantId must be a valid UUID")
 	}
 	if err := c.grantService.TerminateSession(r.Context(), tenant.InstitutionID, tenant.UserID, grantID); err != nil {
+		if errors.Is(err, repository.ErrGrantNotFound) {
+			return NewAppError(http.StatusNotFound, "GRANT_NOT_FOUND", "Support grant session not found")
+		}
 		return NewAppError(http.StatusInternalServerError, "TERMINATE_FAILED", "Failed to terminate support session")
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support session terminated successfully."})

@@ -256,4 +256,15 @@ func TestSessionManagement_HTTPEndpointsEndToEnd(t *testing.T) {
 	if len(sessResp2.Sessions) != 0 {
 		t.Fatalf("expected 0 active sessions after termination, got %d", len(sessResp2.Sessions))
 	}
+
+	// 7. Deleting a non-existent grantId must return 404 Not Found
+	missingID := uuid.New()
+	delMissingReq := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/support/sessions/"+missingID.String(), nil)
+	delMissingReq.Header.Set("Authorization", "Bearer "+adminJWT)
+	delMissingRec := httptest.NewRecorder()
+	mux.ServeHTTP(delMissingRec, delMissingReq)
+
+	if delMissingRec.Code != http.StatusNotFound {
+		t.Fatalf("expected HTTP 404 Not Found for non-existent grantId, got %d: %s", delMissingRec.Code, delMissingRec.Body.String())
+	}
 }
