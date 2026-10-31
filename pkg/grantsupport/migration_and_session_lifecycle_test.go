@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -494,83 +495,252 @@ func TestCrossDialectLiveDatabaseUpgrade(t *testing.T) {
 	}
 }
 
-// TestSQLMigrationFiles_FullLifecycle tests direct execution of physical .sql files for UP -> DOWN -> Re-UP.
+// execSQLStatements strips comment lines, splits a migration script by semicolons, and executes each non-empty statement.
+func execSQLStatements(ctx context.Context, db *sql.DB, script []byte) error {
+	var nonCommentLines []string
+	for _, line := range strings.Split(string(script), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "--") {
+			continue
+		}
+		nonCommentLines = append(nonCommentLines, line)
+	}
+	cleanedScript := strings.Join(nonCommentLines, "\n")
+	for _, rawStmt := range strings.Split(cleanedScript, ";") {
+		stmt := strings.TrimSpace(rawStmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := db.ExecContext(ctx, stmt); err != nil {
+			return fmt.Errorf("statement failed (%s): %w", stmt, err)
+		}
+	}
+	return nil
+}
+
+// runDialectPhysicalMigrationsTest verifies 000001-000004 on a fresh DB (including 000004 down/up reversibility)
+// and verifies applying 000004 on a DB that already has data in gs_access_requests.
+func runDialectPhysicalMigrationsTest(t *testing.T, ctx context.Context, dialect string, openFreshDB func(t *testing.T, suffix string) *sql.DB) {
+	t.Helper()
+
+	readMig := func(name string) []byte {
+		t.Helper()
+		path := fmt.Sprintf("../../migrations/%s/%s", dialect, name)
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("[%s] Failed to read migration %s: %v", dialect, path, err)
+		}
+		return b
+	}
+
+	up1 := readMig("000001_initial_grantsupport_schema.up.sql")
+	up2 := readMig("000002_add_used_by_id_to_support_grants.up.sql")
+	up3 := readMig("000003_add_access_requests.up.sql")
+	up4 := readMig("000004_drop_access_requests.up.sql")
+
+	down4 := readMig("000004_drop_access_requests.down.sql")
+	down3 := readMig("000003_add_access_requests.down.sql")
+	down2 := readMig("000002_add_used_by_id_to_support_grants.down.sql")
+	down1 := readMig("000001_initial_grantsupport_schema.down.sql")
+
+	// Scenario 1: Apply 000001-000004 on a fresh DB, verify DOWN reversibility and Re-UP
+	t.Run("FreshDB_000001_to_000004_And_Reversibility", func(t *testing.T) {
+		db := openFreshDB(t, "fresh")
+		defer db.Close()
+
+		// Ensure clean state before starting
+		_ = execSQLStatements(ctx, db, down3)
+		_ = execSQLStatements(ctx, db, down1)
+
+		// A. Execute UP: 1 -> 2 -> 3 -> 4 on a fresh DB
+		for _, script := range [][]byte{up1, up2, up3, up4} {
+			if err := execSQLStatements(ctx, db, script); err != nil {
+				t.Fatalf("[%s] Fresh DB UP 000001-000004 failed: %v", dialect, err)
+			}
+		}
+
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants").Scan(&count); err != nil {
+			t.Fatalf("[%s] Expected gs_support_grants table to exist after 000001-000004 UP: %v", dialect, err)
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_audit_events").Scan(&count); err != nil {
+			t.Fatalf("[%s] Expected gs_audit_events table to exist after 000001-000004 UP: %v", dialect, err)
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
+			t.Fatalf("[%s] Expected gs_access_requests to NOT exist after 000004 UP", dialect)
+		}
+
+		// B. Execute 000004.down -> recreates empty gs_access_requests table
+		if err := execSQLStatements(ctx, db, down4); err != nil {
+			t.Fatalf("[%s] 000004 DOWN failed: %v", dialect, err)
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err != nil || count != 0 {
+			t.Fatalf("[%s] Expected empty gs_access_requests table after 000004 DOWN, got count=%d, err=%v", dialect, count, err)
+		}
+
+		// C. Execute remaining DOWN: 3 -> 2 -> 1
+		for _, script := range [][]byte{down3, down2, down1} {
+			if err := execSQLStatements(ctx, db, script); err != nil {
+				t.Fatalf("[%s] DOWN 000003-000001 failed: %v", dialect, err)
+			}
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants").Scan(&count); err == nil {
+			t.Fatalf("[%s] Expected gs_support_grants to be dropped after full DOWN", dialect)
+		}
+
+		// D. Execute Re-UP: 1 -> 2 -> 3 -> 4
+		for _, script := range [][]byte{up1, up2, up3, up4} {
+			if err := execSQLStatements(ctx, db, script); err != nil {
+				t.Fatalf("[%s] Re-UP 000001-000004 failed: %v", dialect, err)
+			}
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants").Scan(&count); err != nil {
+			t.Fatalf("[%s] Expected gs_support_grants table to exist after Re-UP: %v", dialect, err)
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
+			t.Fatalf("[%s] Expected gs_access_requests to be dropped after Re-UP 000004", dialect)
+		}
+	})
+
+	// Scenario 2: Apply 000004 on a DB that already has data in gs_access_requests
+	t.Run("PopulatedDB_Apply000004_WithExistingData", func(t *testing.T) {
+		db := openFreshDB(t, "populated")
+		defer db.Close()
+
+		// Ensure clean state before starting
+		_ = execSQLStatements(ctx, db, down3)
+		_ = execSQLStatements(ctx, db, down1)
+
+		// 1. Apply 000001 -> 000003
+		for _, script := range [][]byte{up1, up2, up3} {
+			if err := execSQLStatements(ctx, db, script); err != nil {
+				t.Fatalf("[%s] UP 000001-000003 failed: %v", dialect, err)
+			}
+		}
+
+		// 2. Seed existing rows into gs_access_requests and gs_support_grants
+		instID := uuid.New().String()
+		requesterID := uuid.New().String()
+		adminID := uuid.New().String()
+		reqID1 := uuid.New().String()
+		reqID2 := uuid.New().String()
+		grantID := uuid.New().String()
+		tokenHash := fmt.Sprintf("%x", sha256.Sum256([]byte("existing_grant_"+grantID)))
+		expiresAt := time.Now().UTC().Add(2 * time.Hour).Format("2006-01-02 15:04:05")
+
+		insertGrantSQL := fmt.Sprintf(
+			"INSERT INTO gs_support_grants (id, institution_id, granted_by_id, token_hash, expires_at, scope) VALUES ('%s', '%s', '%s', '%s', '%s', 'FULL_ACCESS')",
+			grantID, instID, adminID, tokenHash, expiresAt,
+		)
+		if _, err := db.ExecContext(ctx, insertGrantSQL); err != nil {
+			t.Fatalf("[%s] Failed to insert existing grant row: %v", dialect, err)
+		}
+
+		insertReq1SQL := fmt.Sprintf(
+			"INSERT INTO gs_access_requests (id, institution_id, requester_id, target_service, reason, requested_duration_minutes, requested_scope, status, expires_at) VALUES ('%s', '%s', '%s', 'billing', 'Investigate invoice discrepancy', 60, 'FULL_ACCESS', 'PENDING', '%s')",
+			reqID1, instID, requesterID, expiresAt,
+		)
+		insertReq2SQL := fmt.Sprintf(
+			"INSERT INTO gs_access_requests (id, institution_id, requester_id, target_service, reason, requested_duration_minutes, approved_duration_minutes, requested_scope, approved_scope, status, expires_at, approved_by_id, support_grant_id) VALUES ('%s', '%s', '%s', 'Core API', 'Customer approved ticket', 45, 45, 'FULL_ACCESS', 'FULL_ACCESS', 'APPROVED', '%s', '%s', '%s')",
+			reqID2, instID, requesterID, expiresAt, adminID, grantID,
+		)
+		for _, stmt := range []string{insertReq1SQL, insertReq2SQL} {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				t.Fatalf("[%s] Failed to insert existing row into gs_access_requests: %v", dialect, err)
+			}
+		}
+
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err != nil || count != 2 {
+			t.Fatalf("[%s] Expected 2 rows in gs_access_requests before 000004, got count=%d, err=%v", dialect, count, err)
+		}
+
+		// 3. Apply 000004.up on the populated database
+		if err := execSQLStatements(ctx, db, up4); err != nil {
+			t.Fatalf("[%s] Applying 000004.up on populated gs_access_requests failed: %v", dialect, err)
+		}
+
+		// 4. Verify gs_access_requests is dropped and gs_support_grants data is preserved
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
+			t.Fatalf("[%s] Expected gs_access_requests table to be dropped after 000004.up on populated DB", dialect)
+		}
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants WHERE id = '"+grantID+"'").Scan(&count); err != nil || count != 1 {
+			t.Fatalf("[%s] Expected existing gs_support_grants row to remain intact after 000004.up, got count=%d, err=%v", dialect, count, err)
+		}
+	})
+}
+
+// TestSQLMigrationFiles_FullLifecycle tests direct execution of physical .sql files (000001-000004) across all covered dialects.
 func TestSQLMigrationFiles_FullLifecycle(t *testing.T) {
 	ctx := context.Background()
 
-	// 1. Test SQLite physical migration files
-	t.Run("SQLite_PhysicalMigrationFiles", func(t *testing.T) {
-		dbName := fmt.Sprintf("file:%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.New().String())
-		db, err := sql.Open("sqlite", dbName)
-		if err != nil {
-			t.Fatalf("Failed to open SQLite: %v", err)
-		}
-		defer db.Close()
-
-		up1, err := os.ReadFile("../../migrations/sqlite/000001_initial_grantsupport_schema.up.sql")
-		if err != nil {
-			t.Fatalf("Failed to read 000001.up: %v", err)
-		}
-		up2, err := os.ReadFile("../../migrations/sqlite/000002_add_used_by_id_to_support_grants.up.sql")
-		if err != nil {
-			t.Fatalf("Failed to read 000002.up: %v", err)
-		}
-		up3, err := os.ReadFile("../../migrations/sqlite/000003_add_access_requests.up.sql")
-		if err != nil {
-			t.Fatalf("Failed to read 000003.up: %v", err)
-		}
-
-		down3, err := os.ReadFile("../../migrations/sqlite/000003_add_access_requests.down.sql")
-		if err != nil {
-			t.Fatalf("Failed to read 000003.down: %v", err)
-		}
-		down2, err := os.ReadFile("../../migrations/sqlite/000002_add_used_by_id_to_support_grants.down.sql")
-		if err != nil {
-			t.Fatalf("Failed to read 000002.down: %v", err)
-		}
-		down1, err := os.ReadFile("../../migrations/sqlite/000001_initial_grantsupport_schema.down.sql")
-		if err != nil {
-			t.Fatalf("Failed to read 000001.down: %v", err)
-		}
-
-		// A. Execute UP: 1 -> 2 -> 3
-		for _, script := range [][]byte{up1, up2, up3} {
-			if _, err := db.ExecContext(ctx, string(script)); err != nil {
-				t.Fatalf("UP migration execution failed: %v\nScript: %s", err, string(script))
+	// 1. SQLite physical migration files (always runs in-memory)
+	t.Run("sqlite", func(t *testing.T) {
+		runDialectPhysicalMigrationsTest(t, ctx, "sqlite", func(t *testing.T, suffix string) *sql.DB {
+			dbName := fmt.Sprintf("file:%s_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.New().String(), suffix)
+			db, err := sql.Open("sqlite", dbName)
+			if err != nil {
+				t.Fatalf("Failed to open SQLite: %v", err)
 			}
-		}
-
-		// Verify tables exist
-		var count int
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err != nil {
-			t.Fatalf("Expected gs_access_requests table to exist after UP: %v", err)
-		}
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants").Scan(&count); err != nil {
-			t.Fatalf("Expected gs_support_grants table to exist after UP: %v", err)
-		}
-
-		// B. Execute DOWN: 3 -> 2 -> 1
-		for _, script := range [][]byte{down3, down2, down1} {
-			if _, err := db.ExecContext(ctx, string(script)); err != nil {
-				t.Fatalf("DOWN migration execution failed: %v\nScript: %s", err, string(script))
-			}
-		}
-
-		// Verify tables dropped
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
-			t.Fatalf("Expected gs_access_requests to be dropped after DOWN")
-		}
-
-		// C. Execute Re-UP: 1 -> 2 -> 3
-		for _, script := range [][]byte{up1, up2, up3} {
-			if _, err := db.ExecContext(ctx, string(script)); err != nil {
-				t.Fatalf("Re-UP migration execution failed: %v\nScript: %s", err, string(script))
-			}
-		}
-
-		// Verify tables re-created
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err != nil {
-			t.Fatalf("Expected gs_access_requests table to exist after Re-UP: %v", err)
-		}
+			return db
+		})
 	})
+
+	// 2. Live dialects covered by migration tests (postgres, mysql, mariadb)
+	liveDialects := []struct {
+		name       string
+		driver     string
+		envVar     string
+		defaultDSN string
+	}{
+		{
+			name:       "postgres",
+			driver:     "pgx",
+			envVar:     "TEST_POSTGRES_URL",
+			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable",
+		},
+		{
+			name:       "mysql",
+			driver:     "mysql",
+			envVar:     "TEST_MYSQL_URL",
+			defaultDSN: "grantsupport:secretpassword@tcp(127.0.0.1:3306)/grantsupport?parseTime=true",
+		},
+		{
+			name:       "mariadb",
+			driver:     "mysql",
+			envVar:     "TEST_MARIADB_URL",
+			defaultDSN: "grantsupport:secretpassword@tcp(127.0.0.1:3307)/grantsupport?parseTime=true",
+		},
+	}
+
+	for _, d := range liveDialects {
+		t.Run(d.name, func(t *testing.T) {
+			dsn := os.Getenv(d.envVar)
+			if dsn == "" {
+				dsn = d.defaultDSN
+			}
+
+			probeDB, err := sql.Open(d.driver, dsn)
+			if err != nil {
+				t.Skipf("Skipping %s physical migration test: %v", d.name, err)
+				return
+			}
+			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+			err = probeDB.PingContext(pingCtx)
+			cancel()
+			_ = probeDB.Close()
+			if err != nil {
+				t.Skipf("Skipping %s physical migration test (database unreachable): %v", d.name, err)
+				return
+			}
+
+			runDialectPhysicalMigrationsTest(t, ctx, d.name, func(t *testing.T, _ string) *sql.DB {
+				db, openErr := sql.Open(d.driver, dsn)
+				if openErr != nil {
+					t.Fatalf("[%s] Failed to open DB: %v", d.name, openErr)
+				}
+				return db
+			})
+		})
+	}
 }

@@ -20,56 +20,56 @@ type SupportGrantDelete struct {
 }
 
 // Where appends a list predicates to the SupportGrantDelete builder.
-func (sgd *SupportGrantDelete) Where(ps ...predicate.SupportGrant) *SupportGrantDelete {
-	sgd.mutation.Where(ps...)
-	return sgd
+func (_d *SupportGrantDelete) Where(ps ...predicate.SupportGrant) *SupportGrantDelete {
+	_d.mutation.Where(ps...)
+	return _d
 }
 
 // Exec executes the deletion query and returns how many vertices were deleted.
-func (sgd *SupportGrantDelete) Exec(ctx context.Context) (int, error) {
-	return withHooks(ctx, sgd.sqlExec, sgd.mutation, sgd.hooks)
+func (_d *SupportGrantDelete) Exec(ctx context.Context) (int, error) {
+	return withHooks(ctx, _d.sqlExec, _d.mutation, _d.hooks)
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (sgd *SupportGrantDelete) ExecX(ctx context.Context) int {
-	n, err := sgd.Exec(ctx)
+func (_d *SupportGrantDelete) ExecX(ctx context.Context) int {
+	n, err := _d.Exec(ctx)
 	if err != nil {
 		panic(err)
 	}
 	return n
 }
 
-func (sgd *SupportGrantDelete) sqlExec(ctx context.Context) (int, error) {
+func (_d *SupportGrantDelete) sqlExec(ctx context.Context) (int, error) {
 	_spec := sqlgraph.NewDeleteSpec(supportgrant.Table, sqlgraph.NewFieldSpec(supportgrant.FieldID, field.TypeUUID))
-	if ps := sgd.mutation.predicates; len(ps) > 0 {
+	if ps := _d.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
 				ps[i](selector)
 			}
 		}
 	}
-	affected, err := sqlgraph.DeleteNodes(ctx, sgd.driver, _spec)
+	affected, err := sqlgraph.DeleteNodes(ctx, _d.driver, _spec)
 	if err != nil && sqlgraph.IsConstraintError(err) {
 		err = &ConstraintError{msg: err.Error(), wrap: err}
 	}
-	sgd.mutation.done = true
+	_d.mutation.done = true
 	return affected, err
 }
 
 // SupportGrantDeleteOne is the builder for deleting a single SupportGrant entity.
 type SupportGrantDeleteOne struct {
-	sgd *SupportGrantDelete
+	_d *SupportGrantDelete
 }
 
 // Where appends a list predicates to the SupportGrantDelete builder.
-func (sgdo *SupportGrantDeleteOne) Where(ps ...predicate.SupportGrant) *SupportGrantDeleteOne {
-	sgdo.sgd.mutation.Where(ps...)
-	return sgdo
+func (_d *SupportGrantDeleteOne) Where(ps ...predicate.SupportGrant) *SupportGrantDeleteOne {
+	_d._d.mutation.Where(ps...)
+	return _d
 }
 
 // Exec executes the deletion query.
-func (sgdo *SupportGrantDeleteOne) Exec(ctx context.Context) error {
-	n, err := sgdo.sgd.Exec(ctx)
+func (_d *SupportGrantDeleteOne) Exec(ctx context.Context) error {
+	n, err := _d._d.Exec(ctx)
 	switch {
 	case err != nil:
 		return err
@@ -81,8 +81,8 @@ func (sgdo *SupportGrantDeleteOne) Exec(ctx context.Context) error {
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (sgdo *SupportGrantDeleteOne) ExecX(ctx context.Context) {
-	if err := sgdo.Exec(ctx); err != nil {
+func (_d *SupportGrantDeleteOne) ExecX(ctx context.Context) {
+	if err := _d.Exec(ctx); err != nil {
 		panic(err)
 	}
 }

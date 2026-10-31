@@ -22,93 +22,93 @@ type AuditEventCreate struct {
 }
 
 // SetInstitutionID sets the "institution_id" field.
-func (aec *AuditEventCreate) SetInstitutionID(u uuid.UUID) *AuditEventCreate {
-	aec.mutation.SetInstitutionID(u)
-	return aec
+func (_c *AuditEventCreate) SetInstitutionID(v uuid.UUID) *AuditEventCreate {
+	_c.mutation.SetInstitutionID(v)
+	return _c
 }
 
 // SetActorID sets the "actor_id" field.
-func (aec *AuditEventCreate) SetActorID(u uuid.UUID) *AuditEventCreate {
-	aec.mutation.SetActorID(u)
-	return aec
+func (_c *AuditEventCreate) SetActorID(v uuid.UUID) *AuditEventCreate {
+	_c.mutation.SetActorID(v)
+	return _c
 }
 
 // SetEventType sets the "event_type" field.
-func (aec *AuditEventCreate) SetEventType(s string) *AuditEventCreate {
-	aec.mutation.SetEventType(s)
-	return aec
+func (_c *AuditEventCreate) SetEventType(v string) *AuditEventCreate {
+	_c.mutation.SetEventType(v)
+	return _c
 }
 
 // SetDescription sets the "description" field.
-func (aec *AuditEventCreate) SetDescription(s string) *AuditEventCreate {
-	aec.mutation.SetDescription(s)
-	return aec
+func (_c *AuditEventCreate) SetDescription(v string) *AuditEventCreate {
+	_c.mutation.SetDescription(v)
+	return _c
 }
 
 // SetNillableDescription sets the "description" field if the given value is not nil.
-func (aec *AuditEventCreate) SetNillableDescription(s *string) *AuditEventCreate {
-	if s != nil {
-		aec.SetDescription(*s)
+func (_c *AuditEventCreate) SetNillableDescription(v *string) *AuditEventCreate {
+	if v != nil {
+		_c.SetDescription(*v)
 	}
-	return aec
+	return _c
 }
 
 // SetHashChain sets the "hash_chain" field.
-func (aec *AuditEventCreate) SetHashChain(s string) *AuditEventCreate {
-	aec.mutation.SetHashChain(s)
-	return aec
+func (_c *AuditEventCreate) SetHashChain(v string) *AuditEventCreate {
+	_c.mutation.SetHashChain(v)
+	return _c
 }
 
 // SetNillableHashChain sets the "hash_chain" field if the given value is not nil.
-func (aec *AuditEventCreate) SetNillableHashChain(s *string) *AuditEventCreate {
-	if s != nil {
-		aec.SetHashChain(*s)
+func (_c *AuditEventCreate) SetNillableHashChain(v *string) *AuditEventCreate {
+	if v != nil {
+		_c.SetHashChain(*v)
 	}
-	return aec
+	return _c
 }
 
 // SetCreatedAt sets the "created_at" field.
-func (aec *AuditEventCreate) SetCreatedAt(t time.Time) *AuditEventCreate {
-	aec.mutation.SetCreatedAt(t)
-	return aec
+func (_c *AuditEventCreate) SetCreatedAt(v time.Time) *AuditEventCreate {
+	_c.mutation.SetCreatedAt(v)
+	return _c
 }
 
 // SetNillableCreatedAt sets the "created_at" field if the given value is not nil.
-func (aec *AuditEventCreate) SetNillableCreatedAt(t *time.Time) *AuditEventCreate {
-	if t != nil {
-		aec.SetCreatedAt(*t)
+func (_c *AuditEventCreate) SetNillableCreatedAt(v *time.Time) *AuditEventCreate {
+	if v != nil {
+		_c.SetCreatedAt(*v)
 	}
-	return aec
+	return _c
 }
 
 // SetID sets the "id" field.
-func (aec *AuditEventCreate) SetID(u uuid.UUID) *AuditEventCreate {
-	aec.mutation.SetID(u)
-	return aec
+func (_c *AuditEventCreate) SetID(v uuid.UUID) *AuditEventCreate {
+	_c.mutation.SetID(v)
+	return _c
 }
 
 // SetNillableID sets the "id" field if the given value is not nil.
-func (aec *AuditEventCreate) SetNillableID(u *uuid.UUID) *AuditEventCreate {
-	if u != nil {
-		aec.SetID(*u)
+func (_c *AuditEventCreate) SetNillableID(v *uuid.UUID) *AuditEventCreate {
+	if v != nil {
+		_c.SetID(*v)
 	}
-	return aec
+	return _c
 }
 
 // Mutation returns the AuditEventMutation object of the builder.
-func (aec *AuditEventCreate) Mutation() *AuditEventMutation {
-	return aec.mutation
+func (_c *AuditEventCreate) Mutation() *AuditEventMutation {
+	return _c.mutation
 }
 
 // Save creates the AuditEvent in the database.
-func (aec *AuditEventCreate) Save(ctx context.Context) (*AuditEvent, error) {
-	aec.defaults()
-	return withHooks(ctx, aec.sqlSave, aec.mutation, aec.hooks)
+func (_c *AuditEventCreate) Save(ctx context.Context) (*AuditEvent, error) {
+	_c.defaults()
+	return withHooks(ctx, _c.sqlSave, _c.mutation, _c.hooks)
 }
 
 // SaveX calls Save and panics if Save returns an error.
-func (aec *AuditEventCreate) SaveX(ctx context.Context) *AuditEvent {
-	v, err := aec.Save(ctx)
+func (_c *AuditEventCreate) SaveX(ctx context.Context) *AuditEvent {
+	v, err := _c.Save(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -116,53 +116,53 @@ func (aec *AuditEventCreate) SaveX(ctx context.Context) *AuditEvent {
 }
 
 // Exec executes the query.
-func (aec *AuditEventCreate) Exec(ctx context.Context) error {
-	_, err := aec.Save(ctx)
+func (_c *AuditEventCreate) Exec(ctx context.Context) error {
+	_, err := _c.Save(ctx)
 	return err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (aec *AuditEventCreate) ExecX(ctx context.Context) {
-	if err := aec.Exec(ctx); err != nil {
+func (_c *AuditEventCreate) ExecX(ctx context.Context) {
+	if err := _c.Exec(ctx); err != nil {
 		panic(err)
 	}
 }
 
 // defaults sets the default values of the builder before save.
-func (aec *AuditEventCreate) defaults() {
-	if _, ok := aec.mutation.CreatedAt(); !ok {
+func (_c *AuditEventCreate) defaults() {
+	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := auditevent.DefaultCreatedAt()
-		aec.mutation.SetCreatedAt(v)
+		_c.mutation.SetCreatedAt(v)
 	}
-	if _, ok := aec.mutation.ID(); !ok {
+	if _, ok := _c.mutation.ID(); !ok {
 		v := auditevent.DefaultID()
-		aec.mutation.SetID(v)
+		_c.mutation.SetID(v)
 	}
 }
 
 // check runs all checks and user-defined validators on the builder.
-func (aec *AuditEventCreate) check() error {
-	if _, ok := aec.mutation.InstitutionID(); !ok {
+func (_c *AuditEventCreate) check() error {
+	if _, ok := _c.mutation.InstitutionID(); !ok {
 		return &ValidationError{Name: "institution_id", err: errors.New(`ent: missing required field "AuditEvent.institution_id"`)}
 	}
-	if _, ok := aec.mutation.ActorID(); !ok {
+	if _, ok := _c.mutation.ActorID(); !ok {
 		return &ValidationError{Name: "actor_id", err: errors.New(`ent: missing required field "AuditEvent.actor_id"`)}
 	}
-	if _, ok := aec.mutation.EventType(); !ok {
+	if _, ok := _c.mutation.EventType(); !ok {
 		return &ValidationError{Name: "event_type", err: errors.New(`ent: missing required field "AuditEvent.event_type"`)}
 	}
-	if _, ok := aec.mutation.CreatedAt(); !ok {
+	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "AuditEvent.created_at"`)}
 	}
 	return nil
 }
 
-func (aec *AuditEventCreate) sqlSave(ctx context.Context) (*AuditEvent, error) {
-	if err := aec.check(); err != nil {
+func (_c *AuditEventCreate) sqlSave(ctx context.Context) (*AuditEvent, error) {
+	if err := _c.check(); err != nil {
 		return nil, err
 	}
-	_node, _spec := aec.createSpec()
-	if err := sqlgraph.CreateNode(ctx, aec.driver, _spec); err != nil {
+	_node, _spec := _c.createSpec()
+	if err := sqlgraph.CreateNode(ctx, _c.driver, _spec); err != nil {
 		if sqlgraph.IsConstraintError(err) {
 			err = &ConstraintError{msg: err.Error(), wrap: err}
 		}
@@ -175,41 +175,41 @@ func (aec *AuditEventCreate) sqlSave(ctx context.Context) (*AuditEvent, error) {
 			return nil, err
 		}
 	}
-	aec.mutation.id = &_node.ID
-	aec.mutation.done = true
+	_c.mutation.id = &_node.ID
+	_c.mutation.done = true
 	return _node, nil
 }
 
-func (aec *AuditEventCreate) createSpec() (*AuditEvent, *sqlgraph.CreateSpec) {
+func (_c *AuditEventCreate) createSpec() (*AuditEvent, *sqlgraph.CreateSpec) {
 	var (
-		_node = &AuditEvent{config: aec.config}
+		_node = &AuditEvent{config: _c.config}
 		_spec = sqlgraph.NewCreateSpec(auditevent.Table, sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeUUID))
 	)
-	if id, ok := aec.mutation.ID(); ok {
+	if id, ok := _c.mutation.ID(); ok {
 		_node.ID = id
 		_spec.ID.Value = &id
 	}
-	if value, ok := aec.mutation.InstitutionID(); ok {
+	if value, ok := _c.mutation.InstitutionID(); ok {
 		_spec.SetField(auditevent.FieldInstitutionID, field.TypeUUID, value)
 		_node.InstitutionID = value
 	}
-	if value, ok := aec.mutation.ActorID(); ok {
+	if value, ok := _c.mutation.ActorID(); ok {
 		_spec.SetField(auditevent.FieldActorID, field.TypeUUID, value)
 		_node.ActorID = value
 	}
-	if value, ok := aec.mutation.EventType(); ok {
+	if value, ok := _c.mutation.EventType(); ok {
 		_spec.SetField(auditevent.FieldEventType, field.TypeString, value)
 		_node.EventType = value
 	}
-	if value, ok := aec.mutation.Description(); ok {
+	if value, ok := _c.mutation.Description(); ok {
 		_spec.SetField(auditevent.FieldDescription, field.TypeString, value)
 		_node.Description = value
 	}
-	if value, ok := aec.mutation.HashChain(); ok {
+	if value, ok := _c.mutation.HashChain(); ok {
 		_spec.SetField(auditevent.FieldHashChain, field.TypeString, value)
 		_node.HashChain = value
 	}
-	if value, ok := aec.mutation.CreatedAt(); ok {
+	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(auditevent.FieldCreatedAt, field.TypeTime, value)
 		_node.CreatedAt = value
 	}
@@ -224,16 +224,16 @@ type AuditEventCreateBulk struct {
 }
 
 // Save creates the AuditEvent entities in the database.
-func (aecb *AuditEventCreateBulk) Save(ctx context.Context) ([]*AuditEvent, error) {
-	if aecb.err != nil {
-		return nil, aecb.err
+func (_c *AuditEventCreateBulk) Save(ctx context.Context) ([]*AuditEvent, error) {
+	if _c.err != nil {
+		return nil, _c.err
 	}
-	specs := make([]*sqlgraph.CreateSpec, len(aecb.builders))
-	nodes := make([]*AuditEvent, len(aecb.builders))
-	mutators := make([]Mutator, len(aecb.builders))
-	for i := range aecb.builders {
+	specs := make([]*sqlgraph.CreateSpec, len(_c.builders))
+	nodes := make([]*AuditEvent, len(_c.builders))
+	mutators := make([]Mutator, len(_c.builders))
+	for i := range _c.builders {
 		func(i int, root context.Context) {
-			builder := aecb.builders[i]
+			builder := _c.builders[i]
 			builder.defaults()
 			var mut Mutator = MutateFunc(func(ctx context.Context, m Mutation) (Value, error) {
 				mutation, ok := m.(*AuditEventMutation)
@@ -247,11 +247,11 @@ func (aecb *AuditEventCreateBulk) Save(ctx context.Context) ([]*AuditEvent, erro
 				var err error
 				nodes[i], specs[i] = builder.createSpec()
 				if i < len(mutators)-1 {
-					_, err = mutators[i+1].Mutate(root, aecb.builders[i+1].mutation)
+					_, err = mutators[i+1].Mutate(root, _c.builders[i+1].mutation)
 				} else {
 					spec := &sqlgraph.BatchCreateSpec{Nodes: specs}
 					// Invoke the actual operation on the latest mutation in the chain.
-					if err = sqlgraph.BatchCreate(ctx, aecb.driver, spec); err != nil {
+					if err = sqlgraph.BatchCreate(ctx, _c.driver, spec); err != nil {
 						if sqlgraph.IsConstraintError(err) {
 							err = &ConstraintError{msg: err.Error(), wrap: err}
 						}
@@ -271,7 +271,7 @@ func (aecb *AuditEventCreateBulk) Save(ctx context.Context) ([]*AuditEvent, erro
 		}(i, ctx)
 	}
 	if len(mutators) > 0 {
-		if _, err := mutators[0].Mutate(ctx, aecb.builders[0].mutation); err != nil {
+		if _, err := mutators[0].Mutate(ctx, _c.builders[0].mutation); err != nil {
 			return nil, err
 		}
 	}
@@ -279,8 +279,8 @@ func (aecb *AuditEventCreateBulk) Save(ctx context.Context) ([]*AuditEvent, erro
 }
 
 // SaveX is like Save, but panics if an error occurs.
-func (aecb *AuditEventCreateBulk) SaveX(ctx context.Context) []*AuditEvent {
-	v, err := aecb.Save(ctx)
+func (_c *AuditEventCreateBulk) SaveX(ctx context.Context) []*AuditEvent {
+	v, err := _c.Save(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -288,14 +288,14 @@ func (aecb *AuditEventCreateBulk) SaveX(ctx context.Context) []*AuditEvent {
 }
 
 // Exec executes the query.
-func (aecb *AuditEventCreateBulk) Exec(ctx context.Context) error {
-	_, err := aecb.Save(ctx)
+func (_c *AuditEventCreateBulk) Exec(ctx context.Context) error {
+	_, err := _c.Save(ctx)
 	return err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (aecb *AuditEventCreateBulk) ExecX(ctx context.Context) {
-	if err := aecb.Exec(ctx); err != nil {
+func (_c *AuditEventCreateBulk) ExecX(ctx context.Context) {
+	if err := _c.Exec(ctx); err != nil {
 		panic(err)
 	}
 }

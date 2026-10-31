@@ -117,38 +117,6 @@ Implements capability interfaces defined in `pkg/ports/`:
 Standard for the HTTP API:
 * **Asymmetric RS256 Signing**: Tokens are signed using a private RSA key (`JWT_PRIVATE_KEY`) and verified using the corresponding public key (`JWT_PUBLIC_KEY`).
 * **Active Revocation Verification**: The `NewAuthMiddleware` extracts `token_version`, `institution_id`, and `user_id` from JWT claims and queries the `RevocationStore`. If the current version in the store exceeds the JWT's version, the request is rejected with HTTP 401 `TOKEN_REVOKED`.
----
-
-### 3.2 Just-In-Time (JIT) Access Request & Customer Approval Lifecycle
-
-GrantSupport provides an optional, in-band request and approval state machine:
-
-```
-[Support Agent]                                                GrantSupport                                              [Customer Admin]
-       │                                                             │                                                          │
-       │── 1. POST /access-requests (reason, duration, scope) ──────►│                                                          │
-       │                                                             ├── 2. Persist in gs_access_requests (status='PENDING')    │
-       │                                                             ├── 3. Append 'access_request.created' audit event         │
-       │                                                             └── 4. Dispatch async webhook 'access_request.created'     │
-       │◄── 5. Return Created AccessRequest (201 Created) ───────────┤                                                          │
-       │                                                             │                                                          │
-       │                                                             │◄── 6. GET /access-requests (views pending requests) ─────│
-       │                                                             │                                                          │
-       │                                                             │◄── 7. POST /access-requests/{id}/approve ────────────────│
-       │                                                             │    (Check: approver_id != requester_id)                  │
-       │                                                             │    (BEGIN DB TRANSACTION)                                │
-       │                                                             │    ├── Atomic CAS: status='APPROVED', expires_at > now   │
-       │                                                             │    ├── Insert SupportGrant record (SHA-256 token hash)   │
-       │                                                             │    └── Append 'access_request.approved' audit event      │
-       │                                                             │    (COMMIT DB TRANSACTION)                               │
-       │                                                             │    └── Dispatch async webhook 'access_request.approved'  │
-       │                                                             │─── 8. Return rawToken once in HTTP response ────────────►│
-       │                                                             │       (Admin shares rawToken via secure channel)         │
-       │                                                             │                                                          │
-       │◄── 9. Agent receives token out-of-band / via ticket ────────┴──────────────────────────────────────────────────────────┘
-       │
-       │── 10. POST /auth/support/login (token, agentId) ───────────► [Same single-use redemption and JWT issuance]
-```
 
 ---
 

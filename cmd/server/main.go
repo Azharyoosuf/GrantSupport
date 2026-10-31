@@ -145,7 +145,6 @@ func main() {
 	supportGrantRepo := repository.NewSupportGrantRepository(baseRepo)
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	auditRepo.SetLockStore(lockStore)
-	accessRequestRepo := repository.NewAccessRequestRepository(baseRepo)
 
 	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
 	grantService.SetRevocationStore(revocationStore)
@@ -161,15 +160,9 @@ func main() {
 		}
 	}
 
-	accessRequestService := service.NewAccessRequestService(baseRepo, accessRequestRepo, supportGrantRepo, auditRepo, lockStore)
-	if webhookDispatcher != nil {
-		accessRequestService.SetWebhookDispatcher(webhookDispatcher)
-	}
-
 	grantController := controller.NewSupportGrantController(grantService)
 	auditService := service.NewSecurityAuditService(auditRepo)
 	auditController := controller.NewAuditController(auditService)
-	accessRequestController := controller.NewAccessRequestController(accessRequestService)
 	jwksController := controller.NewJWKSController()
 	healthController := controller.NewHealthController(grantsupport.Version, sqlDB, redisClient)
 
@@ -198,39 +191,9 @@ func main() {
 		middleware.RateLimitMiddleware(rateLimiter, 10, 60),
 	).Post("/api/v1/auth/support/login", controller.CatchAsync(grantController.SupportLogin))
 
-	// Authenticated Access Request & Customer Admin Endpoints
+	// Authenticated Customer Admin Endpoints
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.NewAuthMiddleware(revocationStore))
-
-		// Access Request Creation (Rate limited to 10 req/min)
-		r.With(
-			middleware.RequireRoles("SUPPORT_AGENT"),
-			middleware.RateLimitMiddleware(rateLimiter, 10, 60),
-		).Post("/api/v1/access-requests", controller.CatchAsync(accessRequestController.CreateAccessRequest))
-
-		// Access Request Queries & Cancellation (Shared: Admin & Agent)
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
-		).Get("/api/v1/access-requests", controller.CatchAsync(accessRequestController.ListAccessRequests))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
-		).Get("/api/v1/access-requests/{id}", controller.CatchAsync(accessRequestController.GetAccessRequest))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
-		).Post("/api/v1/access-requests/{id}/cancel", controller.CatchAsync(accessRequestController.CancelAccessRequest))
-
-		// Customer Admin Access Request Approval & Rejection (Rate limited to 20 req/min)
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-			middleware.RateLimitMiddleware(rateLimiter, 20, 60),
-		).Post("/api/v1/access-requests/{id}/approve", controller.CatchAsync(accessRequestController.ApproveAccessRequest))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-			middleware.RateLimitMiddleware(rateLimiter, 20, 60),
-		).Post("/api/v1/access-requests/{id}/reject", controller.CatchAsync(accessRequestController.RejectAccessRequest))
 
 		// Customer Admin Direct Grant Endpoints
 		r.With(

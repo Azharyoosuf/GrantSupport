@@ -6,9 +6,6 @@ import (
 	"entgo.io/ent/dialect/sql"
 )
 
-// AccessRequest is the predicate function for accessrequest builders.
-type AccessRequest func(*sql.Selector)
-
 // AuditEvent is the predicate function for auditevent builders.
 type AuditEvent func(*sql.Selector)
 

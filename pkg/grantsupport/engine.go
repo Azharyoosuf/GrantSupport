@@ -34,24 +34,21 @@ const Version = "v0.1.0-beta.3"
 
 // Engine is the central embeddable GrantSupport core engine instance.
 type Engine struct {
-	config                  *EngineConfig
-	baseRepo                *repository.BaseRepository
-	grantRepo               *repository.SupportGrantRepository
-	auditRepo               *repository.SecurityAuditRepository
-	accessRequestRepo       *repository.AccessRequestRepository
-	grantService            *service.GrantSupportService
-	grantController         *controller.SupportGrantController
-	auditService            *service.SecurityAuditService
-	auditController         *controller.AuditController
-	accessRequestService    *service.AccessRequestService
-	accessRequestController *controller.AccessRequestController
-	jwksController          *controller.JWKSController
-	healthController        *controller.HealthController
-	lockStore               ports.LockStore
-	replayStore             ports.ReplayStore
-	revocationStore         ports.RevocationStore
-	rateLimiter             ports.RateLimiterStore
-	webhookDispatcher       *webhook.WebhookDispatcher
+	config            *EngineConfig
+	baseRepo          *repository.BaseRepository
+	grantRepo         *repository.SupportGrantRepository
+	auditRepo         *repository.SecurityAuditRepository
+	grantService      *service.GrantSupportService
+	grantController   *controller.SupportGrantController
+	auditService      *service.SecurityAuditService
+	auditController   *controller.AuditController
+	jwksController    *controller.JWKSController
+	healthController  *controller.HealthController
+	lockStore         ports.LockStore
+	replayStore       ports.ReplayStore
+	revocationStore   ports.RevocationStore
+	rateLimiter       ports.RateLimiterStore
+	webhookDispatcher *webhook.WebhookDispatcher
 }
 
 // NewEngine initializes a fully configured in-process GrantSupport engine.
@@ -170,7 +167,6 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	grantRepo := repository.NewSupportGrantRepository(baseRepo)
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	auditRepo.SetLockStore(lockStore)
-	accessRequestRepo := repository.NewAccessRequestRepository(baseRepo)
 
 	grantService := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
 	grantService.SetRevocationStore(revocationStore)
@@ -178,37 +174,28 @@ func NewEngine(opts ...Option) (*Engine, error) {
 		grantService.SetWebhookDispatcher(webhookDispatcher)
 	}
 
-	accessRequestService := service.NewAccessRequestService(baseRepo, accessRequestRepo, grantRepo, auditRepo, lockStore)
-	if webhookDispatcher != nil {
-		accessRequestService.SetWebhookDispatcher(webhookDispatcher)
-	}
-
 	grantController := controller.NewSupportGrantController(grantService)
 	auditService := service.NewSecurityAuditService(auditRepo)
 	auditController := controller.NewAuditController(auditService)
-	accessRequestController := controller.NewAccessRequestController(accessRequestService)
 	jwksController := controller.NewJWKSController()
 	healthController := controller.NewHealthController(Version, targetSQLDB, cfg.RedisClient)
 
 	return &Engine{
-		config:                  cfg,
-		baseRepo:                baseRepo,
-		grantRepo:               grantRepo,
-		auditRepo:               auditRepo,
-		accessRequestRepo:       accessRequestRepo,
-		grantService:            grantService,
-		grantController:         grantController,
-		auditService:            auditService,
-		auditController:         auditController,
-		accessRequestService:    accessRequestService,
-		accessRequestController: accessRequestController,
-		jwksController:          jwksController,
-		healthController:        healthController,
-		lockStore:               lockStore,
-		replayStore:             replayStore,
-		revocationStore:         revocationStore,
-		rateLimiter:             rateLimiter,
-		webhookDispatcher:       webhookDispatcher,
+		config:            cfg,
+		baseRepo:          baseRepo,
+		grantRepo:         grantRepo,
+		auditRepo:         auditRepo,
+		grantService:      grantService,
+		grantController:   grantController,
+		auditService:      auditService,
+		auditController:   auditController,
+		jwksController:    jwksController,
+		healthController:  healthController,
+		lockStore:         lockStore,
+		replayStore:       replayStore,
+		revocationStore:   revocationStore,
+		rateLimiter:       rateLimiter,
+		webhookDispatcher: webhookDispatcher,
 	}, nil
 }
 
@@ -253,36 +240,6 @@ func (e *Engine) GetAuditEvents(ctx context.Context, institutionID uuid.UUID, li
 	return e.auditRepo.GetAuditEventsByInstitution(ctx, institutionID, limit, offset)
 }
 
-// CreateAccessRequest creates and persists a new pending access request.
-func (e *Engine) CreateAccessRequest(ctx context.Context, institutionID, requesterID uuid.UUID, input domain.CreateAccessRequestInput) (*domain.AccessRequest, error) {
-	return e.accessRequestService.CreateAccessRequest(ctx, institutionID, requesterID, input)
-}
-
-// GetAccessRequest retrieves an access request by ID.
-func (e *Engine) GetAccessRequest(ctx context.Context, institutionID, requestID uuid.UUID) (*domain.AccessRequest, error) {
-	return e.accessRequestService.GetAccessRequest(ctx, institutionID, requestID)
-}
-
-// ListAccessRequests retrieves paginated access requests for an institution.
-func (e *Engine) ListAccessRequests(ctx context.Context, institutionID uuid.UUID, status string, requesterID *uuid.UUID, limit, offset int) ([]*domain.AccessRequest, error) {
-	return e.accessRequestService.ListAccessRequests(ctx, institutionID, status, requesterID, limit, offset)
-}
-
-// ApproveAccessRequest atomically transitions the request to APPROVED, creates a SupportGrant, and logs the audit event.
-func (e *Engine) ApproveAccessRequest(ctx context.Context, institutionID, approverID, requestID uuid.UUID, input domain.ApproveAccessRequestInput) (*domain.ApproveAccessRequestResult, error) {
-	return e.accessRequestService.ApproveAccessRequest(ctx, institutionID, approverID, requestID, input)
-}
-
-// RejectAccessRequest atomically transitions the request to REJECTED and logs the audit event.
-func (e *Engine) RejectAccessRequest(ctx context.Context, institutionID, rejecterID, requestID uuid.UUID, input domain.RejectAccessRequestInput) error {
-	return e.accessRequestService.RejectAccessRequest(ctx, institutionID, rejecterID, requestID, input)
-}
-
-// CancelAccessRequest transitions a pending request to CANCELLED.
-func (e *Engine) CancelAccessRequest(ctx context.Context, institutionID, actorID, requestID uuid.UUID, isCallerAdmin bool) error {
-	return e.accessRequestService.CancelAccessRequest(ctx, institutionID, actorID, requestID, isCallerAdmin)
-}
-
 // HTTPHandler returns a ready-to-mount standard http.Handler / chi.Router with all GrantSupport endpoints.
 func (e *Engine) HTTPHandler() http.Handler {
 	r := chi.NewRouter()
@@ -308,39 +265,9 @@ func (e *Engine) HTTPHandler() http.Handler {
 		middleware.RateLimitMiddleware(e.rateLimiter, 10, 60),
 	).Post("/api/v1/auth/support/login", controller.CatchAsync(e.grantController.SupportLogin))
 
-	// Authenticated Access Request & Customer Admin Endpoints
+	// Authenticated Customer Admin Endpoints
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.NewAuthMiddleware(e.revocationStore))
-
-		// Access Request Creation (Rate limited to 10 req/min)
-		r.With(
-			middleware.RequireRoles("SUPPORT_AGENT"),
-			middleware.RateLimitMiddleware(e.rateLimiter, 10, 60),
-		).Post("/api/v1/access-requests", controller.CatchAsync(e.accessRequestController.CreateAccessRequest))
-
-		// Access Request Queries & Cancellation (Shared: Admin & Agent)
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
-		).Get("/api/v1/access-requests", controller.CatchAsync(e.accessRequestController.ListAccessRequests))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
-		).Get("/api/v1/access-requests/{id}", controller.CatchAsync(e.accessRequestController.GetAccessRequest))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR", "SUPPORT_AGENT"),
-		).Post("/api/v1/access-requests/{id}/cancel", controller.CatchAsync(e.accessRequestController.CancelAccessRequest))
-
-		// Customer Admin Access Request Approval & Rejection (Rate limited to 20 req/min)
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-			middleware.RateLimitMiddleware(e.rateLimiter, 20, 60),
-		).Post("/api/v1/access-requests/{id}/approve", controller.CatchAsync(e.accessRequestController.ApproveAccessRequest))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-			middleware.RateLimitMiddleware(e.rateLimiter, 20, 60),
-		).Post("/api/v1/access-requests/{id}/reject", controller.CatchAsync(e.accessRequestController.RejectAccessRequest))
 
 		// Customer Admin Direct Grant Endpoints
 		r.With(

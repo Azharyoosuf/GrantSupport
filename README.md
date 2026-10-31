@@ -36,6 +36,7 @@ To maintain a strict security boundary and operational simplicity, GrantSupport 
 * **NOT a Database / API Proxy**: Does not sit in the data path of your database queries or inspect API payload bodies.
 * **NOT a Messaging Service**: Does not provide notification channels (email, Slack, SMS, or ticketing systems) for delivering bearer tokens. The host application or administrator is responsible for relaying the single-use token through trusted operational channels.
 * **NOT a Permissions Engine**: Passes the requested `scope` string into the JWT claims; your host application remains responsible for evaluating and enforcing domain permissions.
+* **NOT a Ticketing or Approval Workflow Engine**: Approval or ticketing workflows belong in the host application, which calls `POST /api/v1/auth/support/grant` once a request is approved.
 
 ---
 
@@ -112,12 +113,11 @@ GrantSupport is designed as a lightweight application-layer service. In the `v0.
 
 ## 6. Key Security Invariants
 
-* **Cross-Tenant Isolation**: Hard SQL constraints and query scoping ensure Tenant A cannot view, approve, modify, or revoke Tenant B tokens or access requests.
-* **Self-Approval Prohibition**: Support agents are mathematically prevented from approving their own access requests (`SELF_APPROVAL_FORBIDDEN`).
-* **Zero Token Persistence**: Single-use raw bearer tokens are returned exactly once upon creation/approval and stored exclusively as SHA-256 hashes in `gs_support_grants`.
+* **Cross-Tenant Isolation**: Hard SQL constraints and query scoping ensure Tenant A cannot view, modify, or revoke Tenant B tokens or sessions.
+* **Zero Token Persistence**: Single-use raw bearer tokens are returned exactly once upon creation and stored exclusively as SHA-256 hashes in `gs_support_grants`.
 * **Fail-Closed Verification**: Unknown key IDs (`kid`), expired grants, and tampering fail closed immediately.
 * **Cryptographic Hash Chaining**: Every lifecycle mutation writes an append-only, SHA-256 chained entry into `gs_audit_events`.
-* **Token Delivery Boundary**: Approval controls whether access may be granted. GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel.
+* **Token Delivery Boundary**: GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel.
 
 ---
 
@@ -130,25 +130,17 @@ GrantSupport exposes a clean, secure REST surface. The authoritative OpenAPI 3.1
 2. **`GET /metrics`** (Public / SRE Network) — Native Prometheus metrics exposition format with bounded cardinality.
 3. **`GET /.well-known/jwks.json`** (Public) — RFC 7517 JWKS with public RSA keys and `kid` tracking.
 
-### Just-In-Time Access Request & Approval Workflow
-4. **`POST /api/v1/access-requests`** (Support Agent JWT, Rate-limited) — Submit JIT access request with reason, duration, and scope.
-5. **`GET /api/v1/access-requests`** (Admin or Agent JWT) — Query paginated access requests for the tenant.
-6. **`GET /api/v1/access-requests/{id}`** (Admin or Agent JWT) — Retrieve specific access request details.
-7. **`POST /api/v1/access-requests/{id}/approve`** (Admin JWT, Rate-limited) — Customer admin approves request, generating single-use grant token.
-8. **`POST /api/v1/access-requests/{id}/reject`** (Admin JWT, Rate-limited) — Customer admin rejects request with reason.
-9. **`POST /api/v1/access-requests/{id}/cancel`** (Admin or Agent JWT) — Cancels a pending access request.
-
 ### Direct Delegation & Session Management
-10. **`POST /api/v1/auth/support/grant`** (Admin JWT, Rate-limited) — Customer admin creates a direct time-bounded delegation grant.
-11. **`POST /api/v1/auth/support/login`** (Public, Rate-limited) — Support agent claims single-use token and receives short-lived RS256 JWT.
-12. **`GET /api/v1/auth/support/sessions`** (Admin JWT) — Lists active redeemed support sessions for tenant.
-13. **`DELETE /api/v1/auth/support/sessions/{grantId}`** (Admin JWT) — Terminates a specific active support session.
-14. **`POST /api/v1/auth/support/logout`** (Support Agent JWT) — Agent voluntary session logout.
-15. **`POST /api/v1/auth/support/revoke`** (Admin JWT, Rate-limited) — Tenant-wide revocation of all pending grants and active sessions.
+4. **`POST /api/v1/auth/support/grant`** (Admin JWT, Rate-limited) — Customer admin creates a direct time-bounded delegation grant.
+5. **`POST /api/v1/auth/support/login`** (Public, Rate-limited) — Support agent claims single-use token and receives short-lived RS256 JWT.
+6. **`GET /api/v1/auth/support/sessions`** (Admin JWT) — Lists active redeemed support sessions for tenant.
+7. **`DELETE /api/v1/auth/support/sessions/{grantId}`** (Admin JWT) — Terminates a specific active support session.
+8. **`POST /api/v1/auth/support/logout`** (Support Agent JWT) — Agent voluntary session logout.
+9. **`POST /api/v1/auth/support/revoke`** (Admin JWT, Rate-limited) — Tenant-wide revocation of all pending grants and active sessions.
 
 ### Cryptographic Audit Ledger
-16. **`GET /api/v1/audit/events`** (Admin JWT) — Paginated audit log retrieval.
-17. **`POST /api/v1/audit/verify`** (Admin JWT) — Cryptographically verifies unbroken SHA-256 hash chain with optional actor and event_type filtering.
+10. **`GET /api/v1/audit/events`** (Admin JWT) — Paginated audit log retrieval.
+11. **`POST /api/v1/audit/verify`** (Admin JWT) — Cryptographically verifies unbroken SHA-256 hash chain with optional actor and event_type filtering.
 
 ---
 

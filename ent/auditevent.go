@@ -53,7 +53,7 @@ func (*AuditEvent) scanValues(columns []string) ([]any, error) {
 
 // assignValues assigns the values that were returned from sql.Rows (after scanning)
 // to the AuditEvent fields.
-func (ae *AuditEvent) assignValues(columns []string, values []any) error {
+func (_m *AuditEvent) assignValues(columns []string, values []any) error {
 	if m, n := len(values), len(columns); m < n {
 		return fmt.Errorf("mismatch number of scan values: %d != %d", m, n)
 	}
@@ -63,46 +63,46 @@ func (ae *AuditEvent) assignValues(columns []string, values []any) error {
 			if value, ok := values[i].(*uuid.UUID); !ok {
 				return fmt.Errorf("unexpected type %T for field id", values[i])
 			} else if value != nil {
-				ae.ID = *value
+				_m.ID = *value
 			}
 		case auditevent.FieldInstitutionID:
 			if value, ok := values[i].(*uuid.UUID); !ok {
 				return fmt.Errorf("unexpected type %T for field institution_id", values[i])
 			} else if value != nil {
-				ae.InstitutionID = *value
+				_m.InstitutionID = *value
 			}
 		case auditevent.FieldActorID:
 			if value, ok := values[i].(*uuid.UUID); !ok {
 				return fmt.Errorf("unexpected type %T for field actor_id", values[i])
 			} else if value != nil {
-				ae.ActorID = *value
+				_m.ActorID = *value
 			}
 		case auditevent.FieldEventType:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field event_type", values[i])
 			} else if value.Valid {
-				ae.EventType = value.String
+				_m.EventType = value.String
 			}
 		case auditevent.FieldDescription:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field description", values[i])
 			} else if value.Valid {
-				ae.Description = value.String
+				_m.Description = value.String
 			}
 		case auditevent.FieldHashChain:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field hash_chain", values[i])
 			} else if value.Valid {
-				ae.HashChain = value.String
+				_m.HashChain = value.String
 			}
 		case auditevent.FieldCreatedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field created_at", values[i])
 			} else if value.Valid {
-				ae.CreatedAt = value.Time
+				_m.CreatedAt = value.Time
 			}
 		default:
-			ae.selectValues.Set(columns[i], values[i])
+			_m.selectValues.Set(columns[i], values[i])
 		}
 	}
 	return nil
@@ -110,50 +110,50 @@ func (ae *AuditEvent) assignValues(columns []string, values []any) error {
 
 // Value returns the ent.Value that was dynamically selected and assigned to the AuditEvent.
 // This includes values selected through modifiers, order, etc.
-func (ae *AuditEvent) Value(name string) (ent.Value, error) {
-	return ae.selectValues.Get(name)
+func (_m *AuditEvent) Value(name string) (ent.Value, error) {
+	return _m.selectValues.Get(name)
 }
 
 // Update returns a builder for updating this AuditEvent.
 // Note that you need to call AuditEvent.Unwrap() before calling this method if this AuditEvent
 // was returned from a transaction, and the transaction was committed or rolled back.
-func (ae *AuditEvent) Update() *AuditEventUpdateOne {
-	return NewAuditEventClient(ae.config).UpdateOne(ae)
+func (_m *AuditEvent) Update() *AuditEventUpdateOne {
+	return NewAuditEventClient(_m.config).UpdateOne(_m)
 }
 
 // Unwrap unwraps the AuditEvent entity that was returned from a transaction after it was closed,
 // so that all future queries will be executed through the driver which created the transaction.
-func (ae *AuditEvent) Unwrap() *AuditEvent {
-	_tx, ok := ae.config.driver.(*txDriver)
+func (_m *AuditEvent) Unwrap() *AuditEvent {
+	_tx, ok := _m.config.driver.(*txDriver)
 	if !ok {
 		panic("ent: AuditEvent is not a transactional entity")
 	}
-	ae.config.driver = _tx.drv
-	return ae
+	_m.config.driver = _tx.drv
+	return _m
 }
 
 // String implements the fmt.Stringer.
-func (ae *AuditEvent) String() string {
+func (_m *AuditEvent) String() string {
 	var builder strings.Builder
 	builder.WriteString("AuditEvent(")
-	builder.WriteString(fmt.Sprintf("id=%v, ", ae.ID))
+	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("institution_id=")
-	builder.WriteString(fmt.Sprintf("%v", ae.InstitutionID))
+	builder.WriteString(fmt.Sprintf("%v", _m.InstitutionID))
 	builder.WriteString(", ")
 	builder.WriteString("actor_id=")
-	builder.WriteString(fmt.Sprintf("%v", ae.ActorID))
+	builder.WriteString(fmt.Sprintf("%v", _m.ActorID))
 	builder.WriteString(", ")
 	builder.WriteString("event_type=")
-	builder.WriteString(ae.EventType)
+	builder.WriteString(_m.EventType)
 	builder.WriteString(", ")
 	builder.WriteString("description=")
-	builder.WriteString(ae.Description)
+	builder.WriteString(_m.Description)
 	builder.WriteString(", ")
 	builder.WriteString("hash_chain=")
-	builder.WriteString(ae.HashChain)
+	builder.WriteString(_m.HashChain)
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
-	builder.WriteString(ae.CreatedAt.Format(time.ANSIC))
+	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))
 	builder.WriteByte(')')
 	return builder.String()
 }

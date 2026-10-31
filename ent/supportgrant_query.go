@@ -29,40 +29,40 @@ type SupportGrantQuery struct {
 }
 
 // Where adds a new predicate for the SupportGrantQuery builder.
-func (sgq *SupportGrantQuery) Where(ps ...predicate.SupportGrant) *SupportGrantQuery {
-	sgq.predicates = append(sgq.predicates, ps...)
-	return sgq
+func (_q *SupportGrantQuery) Where(ps ...predicate.SupportGrant) *SupportGrantQuery {
+	_q.predicates = append(_q.predicates, ps...)
+	return _q
 }
 
 // Limit the number of records to be returned by this query.
-func (sgq *SupportGrantQuery) Limit(limit int) *SupportGrantQuery {
-	sgq.ctx.Limit = &limit
-	return sgq
+func (_q *SupportGrantQuery) Limit(limit int) *SupportGrantQuery {
+	_q.ctx.Limit = &limit
+	return _q
 }
 
 // Offset to start from.
-func (sgq *SupportGrantQuery) Offset(offset int) *SupportGrantQuery {
-	sgq.ctx.Offset = &offset
-	return sgq
+func (_q *SupportGrantQuery) Offset(offset int) *SupportGrantQuery {
+	_q.ctx.Offset = &offset
+	return _q
 }
 
 // Unique configures the query builder to filter duplicate records on query.
 // By default, unique is set to true, and can be disabled using this method.
-func (sgq *SupportGrantQuery) Unique(unique bool) *SupportGrantQuery {
-	sgq.ctx.Unique = &unique
-	return sgq
+func (_q *SupportGrantQuery) Unique(unique bool) *SupportGrantQuery {
+	_q.ctx.Unique = &unique
+	return _q
 }
 
 // Order specifies how the records should be ordered.
-func (sgq *SupportGrantQuery) Order(o ...supportgrant.OrderOption) *SupportGrantQuery {
-	sgq.order = append(sgq.order, o...)
-	return sgq
+func (_q *SupportGrantQuery) Order(o ...supportgrant.OrderOption) *SupportGrantQuery {
+	_q.order = append(_q.order, o...)
+	return _q
 }
 
 // First returns the first SupportGrant entity from the query.
 // Returns a *NotFoundError when no SupportGrant was found.
-func (sgq *SupportGrantQuery) First(ctx context.Context) (*SupportGrant, error) {
-	nodes, err := sgq.Limit(1).All(setContextOp(ctx, sgq.ctx, ent.OpQueryFirst))
+func (_q *SupportGrantQuery) First(ctx context.Context) (*SupportGrant, error) {
+	nodes, err := _q.Limit(1).All(setContextOp(ctx, _q.ctx, ent.OpQueryFirst))
 	if err != nil {
 		return nil, err
 	}
@@ -73,8 +73,8 @@ func (sgq *SupportGrantQuery) First(ctx context.Context) (*SupportGrant, error) 
 }
 
 // FirstX is like First, but panics if an error occurs.
-func (sgq *SupportGrantQuery) FirstX(ctx context.Context) *SupportGrant {
-	node, err := sgq.First(ctx)
+func (_q *SupportGrantQuery) FirstX(ctx context.Context) *SupportGrant {
+	node, err := _q.First(ctx)
 	if err != nil && !IsNotFound(err) {
 		panic(err)
 	}
@@ -83,9 +83,9 @@ func (sgq *SupportGrantQuery) FirstX(ctx context.Context) *SupportGrant {
 
 // FirstID returns the first SupportGrant ID from the query.
 // Returns a *NotFoundError when no SupportGrant ID was found.
-func (sgq *SupportGrantQuery) FirstID(ctx context.Context) (id uuid.UUID, err error) {
+func (_q *SupportGrantQuery) FirstID(ctx context.Context) (id uuid.UUID, err error) {
 	var ids []uuid.UUID
-	if ids, err = sgq.Limit(1).IDs(setContextOp(ctx, sgq.ctx, ent.OpQueryFirstID)); err != nil {
+	if ids, err = _q.Limit(1).IDs(setContextOp(ctx, _q.ctx, ent.OpQueryFirstID)); err != nil {
 		return
 	}
 	if len(ids) == 0 {
@@ -96,8 +96,8 @@ func (sgq *SupportGrantQuery) FirstID(ctx context.Context) (id uuid.UUID, err er
 }
 
 // FirstIDX is like FirstID, but panics if an error occurs.
-func (sgq *SupportGrantQuery) FirstIDX(ctx context.Context) uuid.UUID {
-	id, err := sgq.FirstID(ctx)
+func (_q *SupportGrantQuery) FirstIDX(ctx context.Context) uuid.UUID {
+	id, err := _q.FirstID(ctx)
 	if err != nil && !IsNotFound(err) {
 		panic(err)
 	}
@@ -107,8 +107,8 @@ func (sgq *SupportGrantQuery) FirstIDX(ctx context.Context) uuid.UUID {
 // Only returns a single SupportGrant entity found by the query, ensuring it only returns one.
 // Returns a *NotSingularError when more than one SupportGrant entity is found.
 // Returns a *NotFoundError when no SupportGrant entities are found.
-func (sgq *SupportGrantQuery) Only(ctx context.Context) (*SupportGrant, error) {
-	nodes, err := sgq.Limit(2).All(setContextOp(ctx, sgq.ctx, ent.OpQueryOnly))
+func (_q *SupportGrantQuery) Only(ctx context.Context) (*SupportGrant, error) {
+	nodes, err := _q.Limit(2).All(setContextOp(ctx, _q.ctx, ent.OpQueryOnly))
 	if err != nil {
 		return nil, err
 	}
@@ -123,8 +123,8 @@ func (sgq *SupportGrantQuery) Only(ctx context.Context) (*SupportGrant, error) {
 }
 
 // OnlyX is like Only, but panics if an error occurs.
-func (sgq *SupportGrantQuery) OnlyX(ctx context.Context) *SupportGrant {
-	node, err := sgq.Only(ctx)
+func (_q *SupportGrantQuery) OnlyX(ctx context.Context) *SupportGrant {
+	node, err := _q.Only(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -134,9 +134,9 @@ func (sgq *SupportGrantQuery) OnlyX(ctx context.Context) *SupportGrant {
 // OnlyID is like Only, but returns the only SupportGrant ID in the query.
 // Returns a *NotSingularError when more than one SupportGrant ID is found.
 // Returns a *NotFoundError when no entities are found.
-func (sgq *SupportGrantQuery) OnlyID(ctx context.Context) (id uuid.UUID, err error) {
+func (_q *SupportGrantQuery) OnlyID(ctx context.Context) (id uuid.UUID, err error) {
 	var ids []uuid.UUID
-	if ids, err = sgq.Limit(2).IDs(setContextOp(ctx, sgq.ctx, ent.OpQueryOnlyID)); err != nil {
+	if ids, err = _q.Limit(2).IDs(setContextOp(ctx, _q.ctx, ent.OpQueryOnlyID)); err != nil {
 		return
 	}
 	switch len(ids) {
@@ -151,8 +151,8 @@ func (sgq *SupportGrantQuery) OnlyID(ctx context.Context) (id uuid.UUID, err err
 }
 
 // OnlyIDX is like OnlyID, but panics if an error occurs.
-func (sgq *SupportGrantQuery) OnlyIDX(ctx context.Context) uuid.UUID {
-	id, err := sgq.OnlyID(ctx)
+func (_q *SupportGrantQuery) OnlyIDX(ctx context.Context) uuid.UUID {
+	id, err := _q.OnlyID(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -160,18 +160,18 @@ func (sgq *SupportGrantQuery) OnlyIDX(ctx context.Context) uuid.UUID {
 }
 
 // All executes the query and returns a list of SupportGrants.
-func (sgq *SupportGrantQuery) All(ctx context.Context) ([]*SupportGrant, error) {
-	ctx = setContextOp(ctx, sgq.ctx, ent.OpQueryAll)
-	if err := sgq.prepareQuery(ctx); err != nil {
+func (_q *SupportGrantQuery) All(ctx context.Context) ([]*SupportGrant, error) {
+	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryAll)
+	if err := _q.prepareQuery(ctx); err != nil {
 		return nil, err
 	}
 	qr := querierAll[[]*SupportGrant, *SupportGrantQuery]()
-	return withInterceptors[[]*SupportGrant](ctx, sgq, qr, sgq.inters)
+	return withInterceptors[[]*SupportGrant](ctx, _q, qr, _q.inters)
 }
 
 // AllX is like All, but panics if an error occurs.
-func (sgq *SupportGrantQuery) AllX(ctx context.Context) []*SupportGrant {
-	nodes, err := sgq.All(ctx)
+func (_q *SupportGrantQuery) AllX(ctx context.Context) []*SupportGrant {
+	nodes, err := _q.All(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -179,20 +179,20 @@ func (sgq *SupportGrantQuery) AllX(ctx context.Context) []*SupportGrant {
 }
 
 // IDs executes the query and returns a list of SupportGrant IDs.
-func (sgq *SupportGrantQuery) IDs(ctx context.Context) (ids []uuid.UUID, err error) {
-	if sgq.ctx.Unique == nil && sgq.path != nil {
-		sgq.Unique(true)
+func (_q *SupportGrantQuery) IDs(ctx context.Context) (ids []uuid.UUID, err error) {
+	if _q.ctx.Unique == nil && _q.path != nil {
+		_q.Unique(true)
 	}
-	ctx = setContextOp(ctx, sgq.ctx, ent.OpQueryIDs)
-	if err = sgq.Select(supportgrant.FieldID).Scan(ctx, &ids); err != nil {
+	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryIDs)
+	if err = _q.Select(supportgrant.FieldID).Scan(ctx, &ids); err != nil {
 		return nil, err
 	}
 	return ids, nil
 }
 
 // IDsX is like IDs, but panics if an error occurs.
-func (sgq *SupportGrantQuery) IDsX(ctx context.Context) []uuid.UUID {
-	ids, err := sgq.IDs(ctx)
+func (_q *SupportGrantQuery) IDsX(ctx context.Context) []uuid.UUID {
+	ids, err := _q.IDs(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -200,17 +200,17 @@ func (sgq *SupportGrantQuery) IDsX(ctx context.Context) []uuid.UUID {
 }
 
 // Count returns the count of the given query.
-func (sgq *SupportGrantQuery) Count(ctx context.Context) (int, error) {
-	ctx = setContextOp(ctx, sgq.ctx, ent.OpQueryCount)
-	if err := sgq.prepareQuery(ctx); err != nil {
+func (_q *SupportGrantQuery) Count(ctx context.Context) (int, error) {
+	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryCount)
+	if err := _q.prepareQuery(ctx); err != nil {
 		return 0, err
 	}
-	return withInterceptors[int](ctx, sgq, querierCount[*SupportGrantQuery](), sgq.inters)
+	return withInterceptors[int](ctx, _q, querierCount[*SupportGrantQuery](), _q.inters)
 }
 
 // CountX is like Count, but panics if an error occurs.
-func (sgq *SupportGrantQuery) CountX(ctx context.Context) int {
-	count, err := sgq.Count(ctx)
+func (_q *SupportGrantQuery) CountX(ctx context.Context) int {
+	count, err := _q.Count(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -218,9 +218,9 @@ func (sgq *SupportGrantQuery) CountX(ctx context.Context) int {
 }
 
 // Exist returns true if the query has elements in the graph.
-func (sgq *SupportGrantQuery) Exist(ctx context.Context) (bool, error) {
-	ctx = setContextOp(ctx, sgq.ctx, ent.OpQueryExist)
-	switch _, err := sgq.FirstID(ctx); {
+func (_q *SupportGrantQuery) Exist(ctx context.Context) (bool, error) {
+	ctx = setContextOp(ctx, _q.ctx, ent.OpQueryExist)
+	switch _, err := _q.FirstID(ctx); {
 	case IsNotFound(err):
 		return false, nil
 	case err != nil:
@@ -231,8 +231,8 @@ func (sgq *SupportGrantQuery) Exist(ctx context.Context) (bool, error) {
 }
 
 // ExistX is like Exist, but panics if an error occurs.
-func (sgq *SupportGrantQuery) ExistX(ctx context.Context) bool {
-	exist, err := sgq.Exist(ctx)
+func (_q *SupportGrantQuery) ExistX(ctx context.Context) bool {
+	exist, err := _q.Exist(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -241,19 +241,19 @@ func (sgq *SupportGrantQuery) ExistX(ctx context.Context) bool {
 
 // Clone returns a duplicate of the SupportGrantQuery builder, including all associated steps. It can be
 // used to prepare common query builders and use them differently after the clone is made.
-func (sgq *SupportGrantQuery) Clone() *SupportGrantQuery {
-	if sgq == nil {
+func (_q *SupportGrantQuery) Clone() *SupportGrantQuery {
+	if _q == nil {
 		return nil
 	}
 	return &SupportGrantQuery{
-		config:     sgq.config,
-		ctx:        sgq.ctx.Clone(),
-		order:      append([]supportgrant.OrderOption{}, sgq.order...),
-		inters:     append([]Interceptor{}, sgq.inters...),
-		predicates: append([]predicate.SupportGrant{}, sgq.predicates...),
+		config:     _q.config,
+		ctx:        _q.ctx.Clone(),
+		order:      append([]supportgrant.OrderOption{}, _q.order...),
+		inters:     append([]Interceptor{}, _q.inters...),
+		predicates: append([]predicate.SupportGrant{}, _q.predicates...),
 		// clone intermediate query.
-		sql:  sgq.sql.Clone(),
-		path: sgq.path,
+		sql:  _q.sql.Clone(),
+		path: _q.path,
 	}
 }
 
@@ -271,10 +271,10 @@ func (sgq *SupportGrantQuery) Clone() *SupportGrantQuery {
 //		GroupBy(supportgrant.FieldInstitutionID).
 //		Aggregate(ent.Count()).
 //		Scan(ctx, &v)
-func (sgq *SupportGrantQuery) GroupBy(field string, fields ...string) *SupportGrantGroupBy {
-	sgq.ctx.Fields = append([]string{field}, fields...)
-	grbuild := &SupportGrantGroupBy{build: sgq}
-	grbuild.flds = &sgq.ctx.Fields
+func (_q *SupportGrantQuery) GroupBy(field string, fields ...string) *SupportGrantGroupBy {
+	_q.ctx.Fields = append([]string{field}, fields...)
+	grbuild := &SupportGrantGroupBy{build: _q}
+	grbuild.flds = &_q.ctx.Fields
 	grbuild.label = supportgrant.Label
 	grbuild.scan = grbuild.Scan
 	return grbuild
@@ -292,62 +292,62 @@ func (sgq *SupportGrantQuery) GroupBy(field string, fields ...string) *SupportGr
 //	client.SupportGrant.Query().
 //		Select(supportgrant.FieldInstitutionID).
 //		Scan(ctx, &v)
-func (sgq *SupportGrantQuery) Select(fields ...string) *SupportGrantSelect {
-	sgq.ctx.Fields = append(sgq.ctx.Fields, fields...)
-	sbuild := &SupportGrantSelect{SupportGrantQuery: sgq}
+func (_q *SupportGrantQuery) Select(fields ...string) *SupportGrantSelect {
+	_q.ctx.Fields = append(_q.ctx.Fields, fields...)
+	sbuild := &SupportGrantSelect{SupportGrantQuery: _q}
 	sbuild.label = supportgrant.Label
-	sbuild.flds, sbuild.scan = &sgq.ctx.Fields, sbuild.Scan
+	sbuild.flds, sbuild.scan = &_q.ctx.Fields, sbuild.Scan
 	return sbuild
 }
 
 // Aggregate returns a SupportGrantSelect configured with the given aggregations.
-func (sgq *SupportGrantQuery) Aggregate(fns ...AggregateFunc) *SupportGrantSelect {
-	return sgq.Select().Aggregate(fns...)
+func (_q *SupportGrantQuery) Aggregate(fns ...AggregateFunc) *SupportGrantSelect {
+	return _q.Select().Aggregate(fns...)
 }
 
-func (sgq *SupportGrantQuery) prepareQuery(ctx context.Context) error {
-	for _, inter := range sgq.inters {
+func (_q *SupportGrantQuery) prepareQuery(ctx context.Context) error {
+	for _, inter := range _q.inters {
 		if inter == nil {
 			return fmt.Errorf("ent: uninitialized interceptor (forgotten import ent/runtime?)")
 		}
 		if trv, ok := inter.(Traverser); ok {
-			if err := trv.Traverse(ctx, sgq); err != nil {
+			if err := trv.Traverse(ctx, _q); err != nil {
 				return err
 			}
 		}
 	}
-	for _, f := range sgq.ctx.Fields {
+	for _, f := range _q.ctx.Fields {
 		if !supportgrant.ValidColumn(f) {
 			return &ValidationError{Name: f, err: fmt.Errorf("ent: invalid field %q for query", f)}
 		}
 	}
-	if sgq.path != nil {
-		prev, err := sgq.path(ctx)
+	if _q.path != nil {
+		prev, err := _q.path(ctx)
 		if err != nil {
 			return err
 		}
-		sgq.sql = prev
+		_q.sql = prev
 	}
 	return nil
 }
 
-func (sgq *SupportGrantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*SupportGrant, error) {
+func (_q *SupportGrantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*SupportGrant, error) {
 	var (
 		nodes = []*SupportGrant{}
-		_spec = sgq.querySpec()
+		_spec = _q.querySpec()
 	)
 	_spec.ScanValues = func(columns []string) ([]any, error) {
 		return (*SupportGrant).scanValues(nil, columns)
 	}
 	_spec.Assign = func(columns []string, values []any) error {
-		node := &SupportGrant{config: sgq.config}
+		node := &SupportGrant{config: _q.config}
 		nodes = append(nodes, node)
 		return node.assignValues(columns, values)
 	}
 	for i := range hooks {
 		hooks[i](ctx, _spec)
 	}
-	if err := sqlgraph.QueryNodes(ctx, sgq.driver, _spec); err != nil {
+	if err := sqlgraph.QueryNodes(ctx, _q.driver, _spec); err != nil {
 		return nil, err
 	}
 	if len(nodes) == 0 {
@@ -356,24 +356,24 @@ func (sgq *SupportGrantQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([
 	return nodes, nil
 }
 
-func (sgq *SupportGrantQuery) sqlCount(ctx context.Context) (int, error) {
-	_spec := sgq.querySpec()
-	_spec.Node.Columns = sgq.ctx.Fields
-	if len(sgq.ctx.Fields) > 0 {
-		_spec.Unique = sgq.ctx.Unique != nil && *sgq.ctx.Unique
+func (_q *SupportGrantQuery) sqlCount(ctx context.Context) (int, error) {
+	_spec := _q.querySpec()
+	_spec.Node.Columns = _q.ctx.Fields
+	if len(_q.ctx.Fields) > 0 {
+		_spec.Unique = _q.ctx.Unique != nil && *_q.ctx.Unique
 	}
-	return sqlgraph.CountNodes(ctx, sgq.driver, _spec)
+	return sqlgraph.CountNodes(ctx, _q.driver, _spec)
 }
 
-func (sgq *SupportGrantQuery) querySpec() *sqlgraph.QuerySpec {
+func (_q *SupportGrantQuery) querySpec() *sqlgraph.QuerySpec {
 	_spec := sqlgraph.NewQuerySpec(supportgrant.Table, supportgrant.Columns, sqlgraph.NewFieldSpec(supportgrant.FieldID, field.TypeUUID))
-	_spec.From = sgq.sql
-	if unique := sgq.ctx.Unique; unique != nil {
+	_spec.From = _q.sql
+	if unique := _q.ctx.Unique; unique != nil {
 		_spec.Unique = *unique
-	} else if sgq.path != nil {
+	} else if _q.path != nil {
 		_spec.Unique = true
 	}
-	if fields := sgq.ctx.Fields; len(fields) > 0 {
+	if fields := _q.ctx.Fields; len(fields) > 0 {
 		_spec.Node.Columns = make([]string, 0, len(fields))
 		_spec.Node.Columns = append(_spec.Node.Columns, supportgrant.FieldID)
 		for i := range fields {
@@ -382,20 +382,20 @@ func (sgq *SupportGrantQuery) querySpec() *sqlgraph.QuerySpec {
 			}
 		}
 	}
-	if ps := sgq.predicates; len(ps) > 0 {
+	if ps := _q.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
 				ps[i](selector)
 			}
 		}
 	}
-	if limit := sgq.ctx.Limit; limit != nil {
+	if limit := _q.ctx.Limit; limit != nil {
 		_spec.Limit = *limit
 	}
-	if offset := sgq.ctx.Offset; offset != nil {
+	if offset := _q.ctx.Offset; offset != nil {
 		_spec.Offset = *offset
 	}
-	if ps := sgq.order; len(ps) > 0 {
+	if ps := _q.order; len(ps) > 0 {
 		_spec.Order = func(selector *sql.Selector) {
 			for i := range ps {
 				ps[i](selector)
@@ -405,33 +405,33 @@ func (sgq *SupportGrantQuery) querySpec() *sqlgraph.QuerySpec {
 	return _spec
 }
 
-func (sgq *SupportGrantQuery) sqlQuery(ctx context.Context) *sql.Selector {
-	builder := sql.Dialect(sgq.driver.Dialect())
+func (_q *SupportGrantQuery) sqlQuery(ctx context.Context) *sql.Selector {
+	builder := sql.Dialect(_q.driver.Dialect())
 	t1 := builder.Table(supportgrant.Table)
-	columns := sgq.ctx.Fields
+	columns := _q.ctx.Fields
 	if len(columns) == 0 {
 		columns = supportgrant.Columns
 	}
 	selector := builder.Select(t1.Columns(columns...)...).From(t1)
-	if sgq.sql != nil {
-		selector = sgq.sql
+	if _q.sql != nil {
+		selector = _q.sql
 		selector.Select(selector.Columns(columns...)...)
 	}
-	if sgq.ctx.Unique != nil && *sgq.ctx.Unique {
+	if _q.ctx.Unique != nil && *_q.ctx.Unique {
 		selector.Distinct()
 	}
-	for _, p := range sgq.predicates {
+	for _, p := range _q.predicates {
 		p(selector)
 	}
-	for _, p := range sgq.order {
+	for _, p := range _q.order {
 		p(selector)
 	}
-	if offset := sgq.ctx.Offset; offset != nil {
+	if offset := _q.ctx.Offset; offset != nil {
 		// limit is mandatory for offset clause. We start
 		// with default value, and override it below if needed.
 		selector.Offset(*offset).Limit(math.MaxInt32)
 	}
-	if limit := sgq.ctx.Limit; limit != nil {
+	if limit := _q.ctx.Limit; limit != nil {
 		selector.Limit(*limit)
 	}
 	return selector
@@ -444,41 +444,41 @@ type SupportGrantGroupBy struct {
 }
 
 // Aggregate adds the given aggregation functions to the group-by query.
-func (sggb *SupportGrantGroupBy) Aggregate(fns ...AggregateFunc) *SupportGrantGroupBy {
-	sggb.fns = append(sggb.fns, fns...)
-	return sggb
+func (_g *SupportGrantGroupBy) Aggregate(fns ...AggregateFunc) *SupportGrantGroupBy {
+	_g.fns = append(_g.fns, fns...)
+	return _g
 }
 
 // Scan applies the selector query and scans the result into the given value.
-func (sggb *SupportGrantGroupBy) Scan(ctx context.Context, v any) error {
-	ctx = setContextOp(ctx, sggb.build.ctx, ent.OpQueryGroupBy)
-	if err := sggb.build.prepareQuery(ctx); err != nil {
+func (_g *SupportGrantGroupBy) Scan(ctx context.Context, v any) error {
+	ctx = setContextOp(ctx, _g.build.ctx, ent.OpQueryGroupBy)
+	if err := _g.build.prepareQuery(ctx); err != nil {
 		return err
 	}
-	return scanWithInterceptors[*SupportGrantQuery, *SupportGrantGroupBy](ctx, sggb.build, sggb, sggb.build.inters, v)
+	return scanWithInterceptors[*SupportGrantQuery, *SupportGrantGroupBy](ctx, _g.build, _g, _g.build.inters, v)
 }
 
-func (sggb *SupportGrantGroupBy) sqlScan(ctx context.Context, root *SupportGrantQuery, v any) error {
+func (_g *SupportGrantGroupBy) sqlScan(ctx context.Context, root *SupportGrantQuery, v any) error {
 	selector := root.sqlQuery(ctx).Select()
-	aggregation := make([]string, 0, len(sggb.fns))
-	for _, fn := range sggb.fns {
+	aggregation := make([]string, 0, len(_g.fns))
+	for _, fn := range _g.fns {
 		aggregation = append(aggregation, fn(selector))
 	}
 	if len(selector.SelectedColumns()) == 0 {
-		columns := make([]string, 0, len(*sggb.flds)+len(sggb.fns))
-		for _, f := range *sggb.flds {
+		columns := make([]string, 0, len(*_g.flds)+len(_g.fns))
+		for _, f := range *_g.flds {
 			columns = append(columns, selector.C(f))
 		}
 		columns = append(columns, aggregation...)
 		selector.Select(columns...)
 	}
-	selector.GroupBy(selector.Columns(*sggb.flds...)...)
+	selector.GroupBy(selector.Columns(*_g.flds...)...)
 	if err := selector.Err(); err != nil {
 		return err
 	}
 	rows := &sql.Rows{}
 	query, args := selector.Query()
-	if err := sggb.build.driver.Query(ctx, query, args, rows); err != nil {
+	if err := _g.build.driver.Query(ctx, query, args, rows); err != nil {
 		return err
 	}
 	defer rows.Close()
@@ -492,27 +492,27 @@ type SupportGrantSelect struct {
 }
 
 // Aggregate adds the given aggregation functions to the selector query.
-func (sgs *SupportGrantSelect) Aggregate(fns ...AggregateFunc) *SupportGrantSelect {
-	sgs.fns = append(sgs.fns, fns...)
-	return sgs
+func (_s *SupportGrantSelect) Aggregate(fns ...AggregateFunc) *SupportGrantSelect {
+	_s.fns = append(_s.fns, fns...)
+	return _s
 }
 
 // Scan applies the selector query and scans the result into the given value.
-func (sgs *SupportGrantSelect) Scan(ctx context.Context, v any) error {
-	ctx = setContextOp(ctx, sgs.ctx, ent.OpQuerySelect)
-	if err := sgs.prepareQuery(ctx); err != nil {
+func (_s *SupportGrantSelect) Scan(ctx context.Context, v any) error {
+	ctx = setContextOp(ctx, _s.ctx, ent.OpQuerySelect)
+	if err := _s.prepareQuery(ctx); err != nil {
 		return err
 	}
-	return scanWithInterceptors[*SupportGrantQuery, *SupportGrantSelect](ctx, sgs.SupportGrantQuery, sgs, sgs.inters, v)
+	return scanWithInterceptors[*SupportGrantQuery, *SupportGrantSelect](ctx, _s.SupportGrantQuery, _s, _s.inters, v)
 }
 
-func (sgs *SupportGrantSelect) sqlScan(ctx context.Context, root *SupportGrantQuery, v any) error {
+func (_s *SupportGrantSelect) sqlScan(ctx context.Context, root *SupportGrantQuery, v any) error {
 	selector := root.sqlQuery(ctx)
-	aggregation := make([]string, 0, len(sgs.fns))
-	for _, fn := range sgs.fns {
+	aggregation := make([]string, 0, len(_s.fns))
+	for _, fn := range _s.fns {
 		aggregation = append(aggregation, fn(selector))
 	}
-	switch n := len(*sgs.selector.flds); {
+	switch n := len(*_s.selector.flds); {
 	case n == 0 && len(aggregation) > 0:
 		selector.Select(aggregation...)
 	case n != 0 && len(aggregation) > 0:
@@ -520,7 +520,7 @@ func (sgs *SupportGrantSelect) sqlScan(ctx context.Context, root *SupportGrantQu
 	}
 	rows := &sql.Rows{}
 	query, args := selector.Query()
-	if err := sgs.driver.Query(ctx, query, args, rows); err != nil {
+	if err := _s.driver.Query(ctx, query, args, rows); err != nil {
 		return err
 	}
 	defer rows.Close()

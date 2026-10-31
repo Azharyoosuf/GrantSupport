@@ -119,54 +119,7 @@ curl -X POST http://localhost:8080/api/v1/auth/support/logout \
 
 ---
 
-### Step 5: Optional In-Band JIT Access Request & Approval Workflow
-
-GrantSupport allows support agents to initiate access requests that customer administrators review and approve in-band.
-
-#### 1. Agent Submits Access Request (`POST /api/v1/access-requests`):
-```bash
-curl -X POST http://localhost:8080/api/v1/access-requests \
-  -H "Authorization: Bearer <AGENT_JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "targetService": "billing-service",
-    "reason": "Investigating ticket #8492 - customer payment discrepancy",
-    "durationMinutes": 60,
-    "scope": "billing:read",
-    "whitelistedIps": ["198.51.100.4"]
-  }'
-```
-
-#### 2. Customer Admin Approves Access Request (`POST /api/v1/access-requests/{id}/approve`):
-```bash
-curl -X POST http://localhost:8080/api/v1/access-requests/01a004a0-7b2c-7b28-9e5d-e88103bc9505/approve \
-  -H "Authorization: Bearer <ADMIN_JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "durationMinutes": 45,
-    "scope": "billing:read"
-  }'
-```
-
-#### Response (`200 OK`):
-```json
-{
-  "success": true,
-  "requestId": "01a004a0-7b2c-7b28-9e5d-e88103bc9505",
-  "status": "APPROVED",
-  "grantId": "01a004a1-17c3-7b32-97fc-fa9214d394c0",
-  "rawToken": "550e8400-e29b-41d4-a716-446655440000_f92b4c10e82a4d70923f1b0a...",
-  "expiresAt": "2026-08-15T15:30:00Z"
-}
-```
-
-> [!IMPORTANT]
-> **Token Delivery Boundary & Operational Limitation**:
-> "Approval controls whether access may be granted. GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel."
-
----
-
-### Step 6: Customer Admin Immediate Revocation
+### Step 5: Customer Admin Immediate Revocation
 If a customer administrator wants to immediately revoke all active vendor access for their tenant:
 
 ```bash
