@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Removed JIT Access-Request Subsystem**: Removed the in-band JIT access-request and approval feature introduced in `v0.1.0-beta.3` (`/api/v1/access-requests*` endpoints, `AccessRequest` domain/schema/service/controllers, and `access_request.*` audit/webhook events) to consolidate grant issuance onto the single direct delegation path (`POST /api/v1/auth/support/grant`). Approval and ticketing workflows belong in the host application, which calls `POST /api/v1/auth/support/grant` once a request is approved.
 - **Database Migration `000004_drop_access_requests`**: Migration `000004` drops the `gs_access_requests` table (and its indexes) across PostgreSQL, MySQL, MariaDB, and SQLite. **Upgrade Note**: Operators upgrading from `v0.1.0-beta.3` with pending access requests should resolve or export them before applying migration `000004`.
 
+### Fixed
+- **MariaDB `whitelisted_ips` CHECK Constraint Normalization (`000005_normalize_whitelisted_ips_check`)**: Normalized `gs_support_grants.whitelisted_ips` on MariaDB from `CHECK (whitelisted_ips IS NULL OR JSON_VALID(whitelisted_ips))` to `CHECK (json_valid(whitelisted_ips))` so MariaDB users with `AUTO_MIGRATE` enabled no longer crash at startup on `gs_support_grants` (`Error 1091: Can't DROP CONSTRAINT whitelisted_ips`).
+
 ---
 
 ## [0.1.0-beta.3] - 2026-08-15

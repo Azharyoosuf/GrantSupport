@@ -518,8 +518,9 @@ func execSQLStatements(ctx context.Context, db *sql.DB, script []byte) error {
 	return nil
 }
 
-// runDialectPhysicalMigrationsTest verifies 000001-000004 on a fresh DB (including 000004 down/up reversibility)
-// and verifies applying 000004 on a DB that already has data in gs_access_requests.
+// runDialectPhysicalMigrationsTest verifies 000001-000005 on a fresh DB (including down/up reversibility and Ent Schema.Create),
+// verifies applying 000004 on a DB with existing data in gs_access_requests, and verifies upgrading 000001-000004 -> 000005
+// with NULL and JSON array whitelisted_ips rows followed by Ent Schema.Create.
 func runDialectPhysicalMigrationsTest(t *testing.T, ctx context.Context, dialect string, openFreshDB func(t *testing.T, suffix string) *sql.DB) {
 	t.Helper()
 
@@ -537,40 +538,52 @@ func runDialectPhysicalMigrationsTest(t *testing.T, ctx context.Context, dialect
 	up2 := readMig("000002_add_used_by_id_to_support_grants.up.sql")
 	up3 := readMig("000003_add_access_requests.up.sql")
 	up4 := readMig("000004_drop_access_requests.up.sql")
+	up5 := readMig("000005_normalize_whitelisted_ips_check.up.sql")
 
+	down5 := readMig("000005_normalize_whitelisted_ips_check.down.sql")
 	down4 := readMig("000004_drop_access_requests.down.sql")
 	down3 := readMig("000003_add_access_requests.down.sql")
 	down2 := readMig("000002_add_used_by_id_to_support_grants.down.sql")
 	down1 := readMig("000001_initial_grantsupport_schema.down.sql")
 
-	// Scenario 1: Apply 000001-000004 on a fresh DB, verify DOWN reversibility and Re-UP
-	t.Run("FreshDB_000001_to_000004_And_Reversibility", func(t *testing.T) {
-		db := openFreshDB(t, "fresh")
-		defer db.Close()
-
-		// Ensure clean state before starting
+	cleanupAll := func(db *sql.DB) {
 		_ = execSQLStatements(ctx, db, down3)
 		_ = execSQLStatements(ctx, db, down1)
+	}
 
-		// A. Execute UP: 1 -> 2 -> 3 -> 4 on a fresh DB
-		for _, script := range [][]byte{up1, up2, up3, up4} {
+	// Scenario 1 (2a): Apply 000001-000005 on a fresh DB, verify DOWN reversibility, Re-UP, and Ent Schema.Create
+	t.Run("FreshDB_000001_to_000005_And_SchemaCreate", func(t *testing.T) {
+		db := openFreshDB(t, "fresh")
+		defer func() {
+			cleanupAll(db)
+			_ = db.Close()
+		}()
+
+		// Ensure clean state before starting
+		cleanupAll(db)
+
+		// A. Execute UP: 1 -> 2 -> 3 -> 4 -> 5 on a fresh DB
+		for _, script := range [][]byte{up1, up2, up3, up4, up5} {
 			if err := execSQLStatements(ctx, db, script); err != nil {
-				t.Fatalf("[%s] Fresh DB UP 000001-000004 failed: %v", dialect, err)
+				t.Fatalf("[%s] Fresh DB UP 000001-000005 failed: %v", dialect, err)
 			}
 		}
 
 		var count int
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants").Scan(&count); err != nil {
-			t.Fatalf("[%s] Expected gs_support_grants table to exist after 000001-000004 UP: %v", dialect, err)
+			t.Fatalf("[%s] Expected gs_support_grants table to exist after 000001-000005 UP: %v", dialect, err)
 		}
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_audit_events").Scan(&count); err != nil {
-			t.Fatalf("[%s] Expected gs_audit_events table to exist after 000001-000004 UP: %v", dialect, err)
+			t.Fatalf("[%s] Expected gs_audit_events table to exist after 000001-000005 UP: %v", dialect, err)
 		}
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
-			t.Fatalf("[%s] Expected gs_access_requests to NOT exist after 000004 UP", dialect)
+			t.Fatalf("[%s] Expected gs_access_requests to NOT exist after 000004-000005 UP", dialect)
 		}
 
-		// B. Execute 000004.down -> recreates empty gs_access_requests table
+		// B. Execute 000005.down -> 000004.down -> recreates empty gs_access_requests table
+		if err := execSQLStatements(ctx, db, down5); err != nil {
+			t.Fatalf("[%s] 000005 DOWN failed: %v", dialect, err)
+		}
 		if err := execSQLStatements(ctx, db, down4); err != nil {
 			t.Fatalf("[%s] 000004 DOWN failed: %v", dialect, err)
 		}
@@ -588,28 +601,36 @@ func runDialectPhysicalMigrationsTest(t *testing.T, ctx context.Context, dialect
 			t.Fatalf("[%s] Expected gs_support_grants to be dropped after full DOWN", dialect)
 		}
 
-		// D. Execute Re-UP: 1 -> 2 -> 3 -> 4
-		for _, script := range [][]byte{up1, up2, up3, up4} {
+		// D. Execute Re-UP: 1 -> 2 -> 3 -> 4 -> 5
+		for _, script := range [][]byte{up1, up2, up3, up4, up5} {
 			if err := execSQLStatements(ctx, db, script); err != nil {
-				t.Fatalf("[%s] Re-UP 000001-000004 failed: %v", dialect, err)
+				t.Fatalf("[%s] Re-UP 000001-000005 failed: %v", dialect, err)
 			}
 		}
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants").Scan(&count); err != nil {
 			t.Fatalf("[%s] Expected gs_support_grants table to exist after Re-UP: %v", dialect, err)
 		}
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
-			t.Fatalf("[%s] Expected gs_access_requests to be dropped after Re-UP 000004", dialect)
+			t.Fatalf("[%s] Expected gs_access_requests to be dropped after Re-UP 000004-000005", dialect)
+		}
+
+		// E. Run Ent Schema.Create on the 000001-000005 migrated database
+		baseRepo := repository.NewBaseRepositoryWithDB(db, dialect)
+		if err := baseRepo.MasterClient.Schema.Create(ctx); err != nil {
+			t.Fatalf("[%s] Ent Schema.Create after 000001-000005 failed: %v", dialect, err)
 		}
 	})
 
 	// Scenario 2: Apply 000004 on a DB that already has data in gs_access_requests
 	t.Run("PopulatedDB_Apply000004_WithExistingData", func(t *testing.T) {
-		db := openFreshDB(t, "populated")
-		defer db.Close()
+		db := openFreshDB(t, "populated_000004")
+		defer func() {
+			cleanupAll(db)
+			_ = db.Close()
+		}()
 
 		// Ensure clean state before starting
-		_ = execSQLStatements(ctx, db, down3)
-		_ = execSQLStatements(ctx, db, down1)
+		cleanupAll(db)
 
 		// 1. Apply 000001 -> 000003
 		for _, script := range [][]byte{up1, up2, up3} {
@@ -666,6 +687,81 @@ func runDialectPhysicalMigrationsTest(t *testing.T, ctx context.Context, dialect
 		}
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants WHERE id = '"+grantID+"'").Scan(&count); err != nil || count != 1 {
 			t.Fatalf("[%s] Expected existing gs_support_grants row to remain intact after 000004.up, got count=%d, err=%v", dialect, count, err)
+		}
+	})
+
+	// Scenario 3 (2b): Upgrade 000001-000004 -> seed NULL & JSON array whitelisted_ips -> apply 000005 -> verify data & Ent Schema.Create
+	t.Run("Upgrade_000001_to_000004_Then_000005_WithData_And_SchemaCreate", func(t *testing.T) {
+		db := openFreshDB(t, "upgrade_000005")
+		defer func() {
+			cleanupAll(db)
+			_ = db.Close()
+		}()
+
+		// Ensure clean state before starting
+		cleanupAll(db)
+
+		// 1. Apply 000001 -> 000004
+		for _, script := range [][]byte{up1, up2, up3, up4} {
+			if err := execSQLStatements(ctx, db, script); err != nil {
+				t.Fatalf("[%s] UP 000001-000004 failed: %v", dialect, err)
+			}
+		}
+
+		// 2. Insert two rows into gs_support_grants: one with whitelisted_ips = NULL, one with a JSON array
+		instID := uuid.New().String()
+		adminID := uuid.New().String()
+		grantNullID := uuid.New().String()
+		grantJSONID := uuid.New().String()
+		hashNull := fmt.Sprintf("%x", sha256.Sum256([]byte("grant_null_"+grantNullID)))
+		hashJSON := fmt.Sprintf("%x", sha256.Sum256([]byte("grant_json_"+grantJSONID)))
+		expiresAt := time.Now().UTC().Add(2 * time.Hour).Format("2006-01-02 15:04:05")
+
+		insertNullSQL := fmt.Sprintf(
+			"INSERT INTO gs_support_grants (id, institution_id, granted_by_id, token_hash, expires_at, scope, whitelisted_ips) VALUES ('%s', '%s', '%s', '%s', '%s', 'FULL_ACCESS', NULL)",
+			grantNullID, instID, adminID, hashNull, expiresAt,
+		)
+		insertJSONSQL := fmt.Sprintf(
+			`INSERT INTO gs_support_grants (id, institution_id, granted_by_id, token_hash, expires_at, scope, whitelisted_ips) VALUES ('%s', '%s', '%s', '%s', '%s', 'BILLING_ONLY', '["10.0.0.1","192.168.1.0/24"]')`,
+			grantJSONID, instID, adminID, hashJSON, expiresAt,
+		)
+		for _, stmt := range []string{insertNullSQL, insertJSONSQL} {
+			if _, err := db.ExecContext(ctx, stmt); err != nil {
+				t.Fatalf("[%s] Failed to seed gs_support_grants row before 000005: %v", dialect, err)
+			}
+		}
+
+		// 3. Apply 000005.up
+		if err := execSQLStatements(ctx, db, up5); err != nil {
+			t.Fatalf("[%s] Applying 000005.up failed: %v", dialect, err)
+		}
+
+		// 4. Confirm both rows and their whitelisted_ips values remain intact
+		var nullVal sql.NullString
+		if err := db.QueryRowContext(ctx, "SELECT whitelisted_ips FROM gs_support_grants WHERE id = '"+grantNullID+"'").Scan(&nullVal); err != nil {
+			t.Fatalf("[%s] Querying NULL whitelisted_ips row after 000005 failed: %v", dialect, err)
+		}
+		if nullVal.Valid {
+			t.Fatalf("[%s] Expected NULL whitelisted_ips to remain NULL after 000005, got %q", dialect, nullVal.String)
+		}
+
+		var jsonVal sql.NullString
+		if err := db.QueryRowContext(ctx, "SELECT whitelisted_ips FROM gs_support_grants WHERE id = '"+grantJSONID+"'").Scan(&jsonVal); err != nil {
+			t.Fatalf("[%s] Querying JSON whitelisted_ips row after 000005 failed: %v", dialect, err)
+		}
+		if !jsonVal.Valid || !strings.Contains(jsonVal.String, "10.0.0.1") || !strings.Contains(jsonVal.String, "192.168.1.0/24") {
+			t.Fatalf("[%s] Expected JSON array whitelisted_ips to remain intact after 000005, got valid=%v val=%q", dialect, jsonVal.Valid, jsonVal.String)
+		}
+
+		// 5. Run Ent Schema.Create and confirm it succeeds and preserves the rows
+		baseRepo := repository.NewBaseRepositoryWithDB(db, dialect)
+		if err := baseRepo.MasterClient.Schema.Create(ctx); err != nil {
+			t.Fatalf("[%s] Ent Schema.Create after 000005 upgrade failed: %v", dialect, err)
+		}
+
+		var totalRows int
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_support_grants WHERE id IN ('"+grantNullID+"','"+grantJSONID+"')").Scan(&totalRows); err != nil || totalRows != 2 {
+			t.Fatalf("[%s] Expected both rows to remain intact after Schema.Create, got count=%d, err=%v", dialect, totalRows, err)
 		}
 	})
 }
