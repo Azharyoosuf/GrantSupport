@@ -16,7 +16,6 @@ import (
 	_ "modernc.org/sqlite"
 
 	"grantsupport/pkg/adapters/lock"
-	"grantsupport/pkg/adapters/replay"
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/domain"
 	"grantsupport/pkg/ports"
@@ -38,7 +37,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 		t.Fatalf("[%s] Schema creation failed: %v", dialectName, err)
 	}
 
-	// Create capability tables for lock, replay, revocation
+	// Create capability tables for lock and revocation
 	if err := repository.CreateCapabilityTables(ctx, db, dialectName); err != nil {
 		t.Fatalf("[%s] Capability DDL execution failed: %v", dialectName, err)
 	}
@@ -48,7 +47,6 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	lockStore := lock.NewSQLLockStore(db, dialectName)
 	auditRepo.SetLockStore(lockStore)
 
-	replayStore := replay.NewSQLReplayStore(db, dialectName)
 	revocationStore := revocation.NewSQLRevocationStore(db, dialectName)
 
 	instA := uuid.New()
@@ -186,18 +184,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	}
 	_ = lockStore.Release(ctx, shortLockKey, tok2)
 
-	// 6. SQL Replay Store Nonce Uniqueness Test
-	nonce := fmt.Sprintf("nonce_%s", uuid.New().String())
-	valid, err := replayStore.CheckAndSet(ctx, "key1", nonce, 5*time.Minute)
-	if err != nil || !valid {
-		t.Fatalf("[%s] Initial nonce CheckAndSet failed: valid=%v, err=%v", dialectName, valid, err)
-	}
-	valid, err = replayStore.CheckAndSet(ctx, "key1", nonce, 5*time.Minute)
-	if valid || (err != nil && err != ports.ErrReplayDetected) {
-		t.Fatalf("[%s] Reused nonce expected valid=false/ErrReplayDetected, got valid=%v, err=%v", dialectName, valid, err)
-	}
-
-	// 7. SQL Revocation Store Test
+	// 6. SQL Revocation Store Test
 	userRevokeID := uuid.New().String()
 	revoked, err := revocationStore.IsTokenRevoked(ctx, instA.String(), userRevokeID, 1)
 	if err != nil || revoked {

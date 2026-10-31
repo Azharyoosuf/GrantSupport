@@ -212,9 +212,8 @@ func main() {
 * Active session revocation is verified against the `RevocationStore`.
 * If the revocation store fails, requests fail closed with HTTP 503 `REVOCATION_CHECK_UNAVAILABLE`.
 
-### Optional: BulletproofAuth (For Go Embedders)
-* `engine.BulletproofMiddleware(keyStore)` provides an opt-in 5-layer Ed25519 request-signing verification layer for custom machine-to-machine Go routes.
-* **Note**: BulletproofAuth is an opt-in middleware for embedded Go applications and is **not** automatically applied to default public HTTP endpoints.
+### Companion Project: BulletproofAuth
+* The Ed25519 per-request HTTP signing and nonce replay protection middleware formerly bundled in GrantSupport now lives in its own standalone repository: [`github.com/azharyoosuf/bulletproofauth`](https://github.com/azharyoosuf/bulletproofauth).
 
 For full technical specifications, see [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md).
 

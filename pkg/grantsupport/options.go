@@ -18,7 +18,6 @@ type EngineConfig struct {
 	EntClient       *ent.Client
 	RedisClient     *redis.Client
 	LockStore       ports.LockStore
-	ReplayStore     ports.ReplayStore
 	RevocationStore ports.RevocationStore
 	RateLimiter     ports.RateLimiterStore
 	PrivateKeyPEM   []byte
@@ -64,13 +63,6 @@ func WithEntClient(client *ent.Client) Option {
 func WithLockStore(store ports.LockStore) Option {
 	return func(c *EngineConfig) {
 		c.LockStore = store
-	}
-}
-
-// WithReplayStore provides a custom ReplayStore adapter for nonce validation.
-func WithReplayStore(store ports.ReplayStore) Option {
-	return func(c *EngineConfig) {
-		c.ReplayStore = store
 	}
 }
 

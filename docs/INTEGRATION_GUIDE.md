@@ -204,6 +204,8 @@ func main() {
 }
 ```
 
+> **Note on Machine-to-Machine Request Signing**: The `BulletproofAuth` Ed25519 request-signing middleware was extracted into a standalone Go module at [`github.com/azharyoosuf/bulletproofauth`](https://github.com/azharyoosuf/bulletproofauth).
+
 ---
 
 ## 4. Standardized Scope Policy & Matching (`pkg/scope`)

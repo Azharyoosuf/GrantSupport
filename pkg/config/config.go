@@ -15,7 +15,6 @@ type Config struct {
 	Port                     string
 	Environment              string
 	TrustedProxies           []string
-	EnforceStrictIPBinding   bool
 	WebhookURL               string
 	WebhookSecret            string
 	AutoMigrate              bool
@@ -67,8 +66,6 @@ func LoadConfig() (*Config, error) {
 	if env == "" {
 		env = "development"
 	}
-
-	strictIP := os.Getenv("ENFORCE_STRICT_IP_BINDING") == "true"
 
 	// Production Security Guard: Prevent running with unencrypted default database fallback in production
 	if env == "production" {
@@ -152,7 +149,6 @@ func LoadConfig() (*Config, error) {
 		Port:                     port,
 		Environment:              env,
 		TrustedProxies:           trustedProxies,
-		EnforceStrictIPBinding:   strictIP,
 		WebhookURL:               webhookURL,
 		WebhookSecret:            webhookSecret,
 		AutoMigrate:              autoMigrate,

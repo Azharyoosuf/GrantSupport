@@ -103,7 +103,7 @@ func (r *BaseRepository) Transaction(ctx context.Context, fn func(tx *ent.Tx) er
 	return nil
 }
 
-// CreateCapabilityTables creates the SQL capability tables (gs_locks, gs_replays, gs_revocations) for the specified database dialect.
+// CreateCapabilityTables creates the SQL capability tables (gs_locks, gs_revocations) for the specified database dialect.
 func CreateCapabilityTables(ctx context.Context, db *sql.DB, dialect string) error {
 	if db == nil {
 		return nil
@@ -118,10 +118,6 @@ func CreateCapabilityTables(ctx context.Context, db *sql.DB, dialect string) err
 				owner_token TEXT NOT NULL,
 				expires_at DATETIME NOT NULL,
 				acquired_at DATETIME NOT NULL
-			)`,
-			`CREATE TABLE IF NOT EXISTS gs_replays (
-				nonce_key TEXT PRIMARY KEY,
-				expires_at DATETIME NOT NULL
 			)`,
 			`CREATE TABLE IF NOT EXISTS gs_revocations (
 				institution_id TEXT NOT NULL,
@@ -139,10 +135,6 @@ func CreateCapabilityTables(ctx context.Context, db *sql.DB, dialect string) err
 				expires_at DATETIME(6) NOT NULL,
 				acquired_at DATETIME(6) NOT NULL
 			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
-			`CREATE TABLE IF NOT EXISTS gs_replays (
-				nonce_key VARCHAR(255) PRIMARY KEY,
-				expires_at DATETIME(6) NOT NULL
-			) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 			`CREATE TABLE IF NOT EXISTS gs_revocations (
 				institution_id VARCHAR(36) NOT NULL,
 				user_id VARCHAR(36) NOT NULL,
@@ -158,10 +150,6 @@ func CreateCapabilityTables(ctx context.Context, db *sql.DB, dialect string) err
 				owner_token VARCHAR(64) NOT NULL,
 				expires_at TIMESTAMPTZ NOT NULL,
 				acquired_at TIMESTAMPTZ NOT NULL
-			)`,
-			`CREATE TABLE IF NOT EXISTS gs_replays (
-				nonce_key VARCHAR(255) PRIMARY KEY,
-				expires_at TIMESTAMPTZ NOT NULL
 			)`,
 			`CREATE TABLE IF NOT EXISTS gs_revocations (
 				institution_id UUID NOT NULL,

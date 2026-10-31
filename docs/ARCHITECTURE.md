@@ -127,13 +127,8 @@ Standard for the HTTP API:
 * **Revocation Check**: Queries `RevocationStore.IsTokenRevoked(instID, userID, tokenVersion)` on every request.
 * **Fail-Closed Guard**: If the `RevocationStore` is nil or unreachable, the middleware rejects requests with HTTP 503 `REVOCATION_CHECK_UNAVAILABLE`.
 
-### 4.2 Opt-In: BulletproofAuth (5-Layer Ed25519 Request Signing)
-Available via `engine.BulletproofMiddleware(keyStore)` for Go embedders securing machine-to-machine integrations:
-1. **Layer 1**: Ed25519 asymmetric cryptographic signature over canonical request payload (`Method\nPath\nNonce\nExpiresAt\nBody`).
-2. **Layer 2**: Client-specified payload expiration (TTL <= 900s) with 30s clock skew window.
-3. **Layer 3**: Nonce replay attack protection via atomic cache store.
-4. **Layer 4**: Socket-level TCP / trusted proxy client IP binding.
-5. **Layer 5**: Multi-tenant context injection into request context.
+### 4.2 Companion Library: BulletproofAuth (Standalone Repository)
+The Ed25519 per-request HTTP signing and nonce replay protection middleware has been extracted into a standalone Go module: [`github.com/azharyoosuf/bulletproofauth`](https://github.com/azharyoosuf/bulletproofauth).
 
 ---
 

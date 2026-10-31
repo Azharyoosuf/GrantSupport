@@ -15,7 +15,6 @@ import (
 	"grantsupport/ent"
 	"grantsupport/pkg/adapters/lock"
 	"grantsupport/pkg/adapters/ratelimit"
-	"grantsupport/pkg/adapters/replay"
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
@@ -45,7 +44,6 @@ type Engine struct {
 	jwksController    *controller.JWKSController
 	healthController  *controller.HealthController
 	lockStore         ports.LockStore
-	replayStore       ports.ReplayStore
 	revocationStore   ports.RevocationStore
 	rateLimiter       ports.RateLimiterStore
 	webhookDispatcher *webhook.WebhookDispatcher
@@ -133,15 +131,6 @@ func NewEngine(opts ...Option) (*Engine, error) {
 		}
 	}
 
-	replayStore := cfg.ReplayStore
-	if replayStore == nil {
-		if targetSQLDB != nil {
-			replayStore = replay.NewSQLReplayStore(targetSQLDB, targetDialect)
-		} else {
-			replayStore = replay.NewMemoryReplayStore(1 * time.Minute)
-		}
-	}
-
 	revocationStore := cfg.RevocationStore
 	if revocationStore == nil {
 		if targetSQLDB != nil {
@@ -192,7 +181,6 @@ func NewEngine(opts ...Option) (*Engine, error) {
 		jwksController:    jwksController,
 		healthController:  healthController,
 		lockStore:         lockStore,
-		replayStore:       replayStore,
 		revocationStore:   revocationStore,
 		rateLimiter:       rateLimiter,
 		webhookDispatcher: webhookDispatcher,
@@ -309,15 +297,6 @@ func (e *Engine) HTTPHandler() http.Handler {
 	return r
 }
 
-// BulletproofMiddleware returns the 5-layer Ed25519 dual-key authentication middleware.
-// This is an opt-in capability for Go embedders building their own machine-to-machine API routes.
-// It is NOT applied to the default HTTPHandler() endpoints (login/grant/revoke), which use simpler
-// JWT bearer authentication instead. Callers must build and manage their own keyStore — no key
-// persistence or registration API is provided by this package.
-func (e *Engine) BulletproofMiddleware(keyStore map[string]*security.APIKeyDetails) func(http.Handler) http.Handler {
-	return middleware.BulletproofAuthMiddleware(e.replayStore, keyStore)
-}
-
 // AuthMiddleware returns the JWT bearer authentication middleware with revocation checks.
 func (e *Engine) AuthMiddleware() func(http.Handler) http.Handler {
 	return middleware.NewAuthMiddleware(e.revocationStore)
@@ -329,10 +308,6 @@ func (e *Engine) Close() error {
 		drainCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		_ = e.webhookDispatcher.Close(drainCtx)
 		cancel()
-	}
-
-	if memReplay, ok := e.replayStore.(*replay.MemoryReplayStore); ok {
-		memReplay.Close()
 	}
 
 	if e.config.OwnsDB && e.baseRepo != nil && e.baseRepo.SQLDB != nil {
