@@ -26,10 +26,9 @@ GrantSupport is architected around non-negotiable security principles:
 
 If you discover a security vulnerability within GrantSupport, please **do NOT report it publicly on GitHub issues**.
 
-Instead, please responsibly disclose it via email or GitHub Private Vulnerability Reporting:
+Instead, please responsibly disclose it via **GitHub Private Vulnerability Reporting**:
 
-- **Email**: `security@grantsupport.io` (or repository maintainer)
-- **GitHub**: Use the "Report a vulnerability" button under the **Security** tab of the repository.
+- **GitHub Security Advisories**: Submit a private report via [GitHub Private Vulnerability Reporting](https://github.com/azharyoosuf/grantsupport/security/advisories/new) (or click the **"Report a vulnerability"** button under the **Security** tab of the repository).
 
 ### What to Include
 

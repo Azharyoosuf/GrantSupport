@@ -31,7 +31,7 @@ For general questions on how to configure, deploy, or integrate GrantSupport wit
 
 If you discover a security vulnerability:
 * Consult the [Security Policy](SECURITY.md) for responsible disclosure instructions.
-* Use GitHub Private Vulnerability Reporting or email the security maintainer directly at `security@grantsupport.io`.
+* Submit a private report via [GitHub Private Vulnerability Reporting](https://github.com/azharyoosuf/grantsupport/security/advisories/new) under the **Security** tab of the repository.
 
 ---
 
