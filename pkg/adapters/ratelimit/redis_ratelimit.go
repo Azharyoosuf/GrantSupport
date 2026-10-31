@@ -8,7 +8,17 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-// RedisRateLimiter implements ports.RateLimiterStore using Redis INCR and EXPIRE.
+// incrWithExpireScript atomically increments a rate-limit counter and ensures it always has a positive TTL,
+// repairing any pre-existing counter that lacked an expiration.
+var incrWithExpireScript = redis.NewScript(`
+local count = redis.call("INCR", KEYS[1])
+if count == 1 or redis.call("PTTL", KEYS[1]) < 0 then
+	redis.call("PEXPIRE", KEYS[1], ARGV[1])
+end
+return count
+`)
+
+// RedisRateLimiter implements ports.RateLimiterStore using an atomic Redis Lua script (INCR + PEXPIRE).
 type RedisRateLimiter struct {
 	client *redis.Client
 }
@@ -27,14 +37,15 @@ func (r *RedisRateLimiter) Allow(ctx context.Context, key string, limit int, win
 		return false, fmt.Errorf("rate limiter unavailable: redis client not configured")
 	}
 
-	rateKey := fmt.Sprintf("ratelimit:%s", key)
-	count, err := r.client.Incr(ctx, rateKey).Result()
-	if err != nil {
-		return false, fmt.Errorf("failed to evaluate redis rate limit: %w", err)
+	windowMs := window.Milliseconds()
+	if windowMs <= 0 {
+		windowMs = 1000
 	}
 
-	if count == 1 {
-		_ = r.client.Expire(ctx, rateKey, window).Err()
+	rateKey := fmt.Sprintf("ratelimit:%s", key)
+	count, err := incrWithExpireScript.Run(ctx, r.client, []string{rateKey}, windowMs).Int64()
+	if err != nil {
+		return false, fmt.Errorf("failed to evaluate redis rate limit: %w", err)
 	}
 
 	return count <= int64(limit), nil
