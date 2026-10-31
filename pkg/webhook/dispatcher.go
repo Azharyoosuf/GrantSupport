@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"grantsupport/pkg/observability"
 )
 
 // DefaultMaxConcurrentWebhooks limits simultaneous outbound HTTP webhook delivery goroutines.
@@ -152,6 +153,7 @@ func (d *WebhookDispatcher) Dispatch(ctx context.Context, event *WebhookEvent) e
 		return fmt.Errorf("webhook responded with non-2xx status code: %d", resp.StatusCode)
 	}
 
+	observability.DefaultRegistry.IncWebhookDispatches("delivered")
 	return nil
 }
 
@@ -178,6 +180,7 @@ func (d *WebhookDispatcher) DispatchAsync(event *WebhookEvent) {
 	default:
 		// Queue is full (MaxWebhookQueueSize reached): drop and log error to prevent unbounded memory growth
 		atomic.AddUint64(&d.droppedCount, 1)
+		observability.DefaultRegistry.IncWebhookDispatches("dropped_queue_full")
 		slog.Error("ERROR [WEBHOOK_QUEUE_OVERFLOW] Webhook retry queue is full; dropping event to prevent memory exhaustion",
 			slog.String("event_type", event.EventType),
 			slog.String("event_id", event.ID),
@@ -228,6 +231,7 @@ func (d *WebhookDispatcher) executeWithRetry(event *WebhookEvent) {
 		)
 
 		if attempt < MaxWebhookDeliveryAttempts {
+			observability.DefaultRegistry.IncWebhookDispatches("retrying")
 			d.mu.RLock()
 			schedule := d.backoffSchedule
 			d.mu.RUnlock()
@@ -242,6 +246,7 @@ func (d *WebhookDispatcher) executeWithRetry(event *WebhookEvent) {
 	}
 
 	// Dead letter logging after exhausting all retry attempts
+	observability.DefaultRegistry.IncWebhookDispatches("dead_letter")
 	slog.Warn("WARN [WEBHOOK_DEAD_LETTER] Webhook event discarded after exhausting retry attempts",
 		slog.String("event_type", event.EventType),
 		slog.String("event_id", event.ID),

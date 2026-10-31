@@ -1,12 +1,15 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	pkgctx "grantsupport/pkg/context"
 	"grantsupport/pkg/controller"
+	"grantsupport/pkg/observability"
 	"grantsupport/pkg/ports"
 	"grantsupport/pkg/security"
 )
@@ -22,6 +25,7 @@ func NewAuthMiddleware(revocationStore ports.RevocationStore) func(http.Handler)
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+				observability.DefaultRegistry.IncAuthFailures("missing_claims")
 				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "Missing or malformed Authorization header")
 				return
 			}
@@ -29,6 +33,14 @@ func NewAuthMiddleware(revocationStore ports.RevocationStore) func(http.Handler)
 			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
 			claims, err := security.VerifyJWT(tokenStr)
 			if err != nil || claims == nil {
+				switch {
+				case errors.Is(err, jwt.ErrTokenExpired):
+					observability.DefaultRegistry.IncAuthFailures("token_expired")
+				case errors.Is(err, security.ErrKeyNotFound):
+					observability.DefaultRegistry.IncAuthFailures("invalid_kid")
+				default:
+					observability.DefaultRegistry.IncAuthFailures("invalid_signature")
+				}
 				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "INVALID_TOKEN", "JWT signature verification or expiration check failed")
 				return
 			}
@@ -36,6 +48,7 @@ func NewAuthMiddleware(revocationStore ports.RevocationStore) func(http.Handler)
 			instID, errInst := uuid.Parse(claims.InstitutionID)
 			userID, errUser := uuid.Parse(claims.UserID)
 			if errInst != nil || errUser != nil {
+				observability.DefaultRegistry.IncAuthFailures("missing_claims")
 				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "INVALID_CLAIMS", "Malformed UUID claims in JWT payload")
 				return
 			}
@@ -52,6 +65,7 @@ func NewAuthMiddleware(revocationStore ports.RevocationStore) func(http.Handler)
 				return
 			}
 			if revoked {
+				observability.DefaultRegistry.IncAuthFailures("token_revoked")
 				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "TOKEN_REVOKED", "Session has been revoked. Please log in again.")
 				return
 			}

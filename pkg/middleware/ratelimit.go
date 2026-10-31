@@ -7,6 +7,7 @@ import (
 
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
+	"grantsupport/pkg/observability"
 	"grantsupport/pkg/ports"
 	"grantsupport/pkg/security"
 )
@@ -35,6 +36,7 @@ func RateLimitMiddleware(limiter ports.RateLimiterStore, limit int, windowSecond
 				return
 			}
 			if !allowed {
+				observability.DefaultRegistry.IncRateLimitExceeded(NormalizeRoutePattern(r))
 				controller.WriteProblemDetailsError(w, r, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too many requests. Please retry later.")
 				return
 			}

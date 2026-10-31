@@ -5,6 +5,7 @@ import (
 
 	pkgctx "grantsupport/pkg/context"
 	"grantsupport/pkg/controller"
+	"grantsupport/pkg/observability"
 )
 
 // RequireRoles returns a middleware function enforcing role-based access control (RBAC).
@@ -18,11 +19,13 @@ func RequireRoles(allowedRoles ...string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			tenant, ok := pkgctx.GetTenant(r.Context())
 			if !ok || tenant == nil {
+				observability.DefaultRegistry.IncAuthFailures("missing_claims")
 				controller.WriteProblemDetailsError(w, r, http.StatusUnauthorized, "UNAUTHORIZED", "User auth context not found")
 				return
 			}
 
 			if !allowedMap[tenant.Role] {
+				observability.DefaultRegistry.IncAuthFailures("insufficient_role")
 				controller.WriteProblemDetailsError(w, r, http.StatusForbidden, "FORBIDDEN", "You do not have permission to perform this action")
 				return
 			}

@@ -281,6 +281,7 @@ func newServerRouter(
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.CorrelationIDMiddleware)
 	r.Use(middleware.SecurityHeadersMiddleware)
+	r.Use(middleware.MetricsMiddleware)
 
 	// Public Health & Readiness Probes
 	r.Get("/health", controller.CatchAsync(healthController.Live))
@@ -288,7 +289,7 @@ func newServerRouter(
 	r.Get("/health/ready", controller.CatchAsync(healthController.Ready))
 
 	// Prometheus Metrics Scraper Endpoint
-	r.Get("/metrics", observability.DefaultRegistry.Handler())
+	r.Get("/metrics", observability.DefaultRegistry.HandlerWithRefresher(grantController.RefreshMetrics))
 
 	// Public JWKS Endpoint
 	r.Get("/.well-known/jwks.json", controller.CatchAsync(jwksController.GetJWKS))

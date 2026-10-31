@@ -244,6 +244,7 @@ func (e *Engine) HTTPHandler() http.Handler {
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.CorrelationIDMiddleware)
 	r.Use(middleware.SecurityHeadersMiddleware)
+	r.Use(middleware.MetricsMiddleware)
 
 	// Public Health & Readiness Probes
 	r.Get("/health", controller.CatchAsync(e.healthController.Live))
@@ -251,7 +252,7 @@ func (e *Engine) HTTPHandler() http.Handler {
 	r.Get("/health/ready", controller.CatchAsync(e.healthController.Ready))
 
 	// Prometheus Metrics Scraper Endpoint
-	r.Get("/metrics", observability.DefaultRegistry.Handler())
+	r.Get("/metrics", observability.DefaultRegistry.HandlerWithRefresher(e.grantController.RefreshMetrics))
 
 	// Public JWKS Endpoint
 	r.Get("/.well-known/jwks.json", controller.CatchAsync(e.jwksController.GetJWKS))

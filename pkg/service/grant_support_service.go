@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"grantsupport/pkg/domain"
+	"grantsupport/pkg/observability"
 	"grantsupport/pkg/ports"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
@@ -110,6 +111,7 @@ func (s *GrantSupportService) CreateSupportGrantScoped(ctx context.Context, inst
 		return "", err
 	}
 
+	observability.DefaultRegistry.IncGrantsCreated()
 	s.logSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_GRANTED", fmt.Sprintf("Support access grant created for %d minutes with scope %s", durationMinutes, scope))
 
 	if s.webhookDispatcher != nil {
@@ -131,7 +133,15 @@ func (s *GrantSupportService) CreateSupportGrantScoped(ctx context.Context, inst
 
 // SupportLogin authenticates a support agent using a valid support grant token and issues an RS256 JWT access token.
 // If the grant specifies whitelisted_ips, the client's IP is strictly verified before consuming the grant.
-func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string, agentUserID uuid.UUID, clientIP ...string) (uuid.UUID, string, error) {
+func (s *GrantSupportService) SupportLogin(ctx context.Context, rawToken string, agentUserID uuid.UUID, clientIP ...string) (instUUID uuid.UUID, jwtOut string, retErr error) {
+	defer func() {
+		if retErr != nil {
+			observability.DefaultRegistry.IncLogins("failure")
+		} else {
+			observability.DefaultRegistry.IncLogins("success")
+		}
+	}()
+
 	if agentUserID == uuid.Nil {
 		return uuid.Nil, "", errors.New("AGENT_ID_REQUIRED: Explicit agentId UUID must be provided")
 	}
@@ -251,6 +261,7 @@ func (s *GrantSupportService) RevokeSupportGrant(ctx context.Context, institutio
 	}
 
 	desc := fmt.Sprintf("All active support access grants manually revoked by administrator (invalidated %d active support agent session(s))", len(agentIDs))
+	observability.DefaultRegistry.IncRevocations("tenant")
 	s.logSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_REVOKED", desc)
 
 	if s.webhookDispatcher != nil {
@@ -280,6 +291,7 @@ func (s *GrantSupportService) SupportLogout(ctx context.Context, institutionID, 
 		}
 	}
 
+	observability.DefaultRegistry.IncRevocations("agent")
 	s.logSecurityEvent(ctx, institutionID, agentUserID, "SUPPORT_ACCESS_LOGGED_OUT", fmt.Sprintf("Support agent %s voluntarily logged out of support session", agentUserID.String()))
 
 	return nil
@@ -356,6 +368,7 @@ func (s *GrantSupportService) TerminateSession(ctx context.Context, institutionI
 		agentIDStr = grant.UsedByID.String()
 	}
 
+	observability.DefaultRegistry.IncRevocations("session")
 	s.logSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_SESSION_REVOKED",
 		fmt.Sprintf("Support session for grant %s (agent %s) manually terminated by administrator", grantID.String(), agentIDStr))
 
@@ -373,4 +386,18 @@ func (s *GrantSupportService) TerminateSession(ctx context.Context, institutionI
 	}
 
 	return nil
+}
+
+// RefreshMetrics updates active session and database connection pool gauges on a MetricRegistry.
+func (s *GrantSupportService) RefreshMetrics(ctx context.Context, reg *observability.MetricRegistry) {
+	if reg == nil || s.supportGrantRepo == nil {
+		return
+	}
+	if count, err := s.supportGrantRepo.CountActiveSessions(ctx); err == nil {
+		reg.SetActiveSessions(int64(count))
+	}
+	if s.supportGrantRepo.BaseRepository != nil && s.supportGrantRepo.SQLDB != nil {
+		stats := s.supportGrantRepo.SQLDB.Stats()
+		reg.SetDBPoolStats(stats.OpenConnections, stats.InUse)
+	}
 }

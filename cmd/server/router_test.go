@@ -11,6 +11,7 @@ import (
 	"os"
 	"reflect"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ import (
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
 	"grantsupport/pkg/grantsupport"
+	"grantsupport/pkg/observability"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
@@ -679,5 +681,176 @@ func TestValkeyCacheURLUnsetDoesNotDialLocalValkey(t *testing.T) {
 	}
 	if readyResp.Mode != "sql-only" || readyResp.Valkey != "NOT_CONFIGURED" {
 		t.Fatalf("expected sql-only / NOT_CONFIGURED when VALKEY_CACHE_URL is unset, got mode=%q valkey=%q", readyResp.Mode, readyResp.Valkey)
+	}
+}
+
+func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
+	if err := security.SetupTestRSAKeys(); err != nil {
+		t.Fatalf("SetupTestRSAKeys failed: %v", err)
+	}
+
+	for _, rf := range fullRouterFactories() {
+		rf := rf
+		t.Run(rf.name, func(t *testing.T) {
+			observability.DefaultRegistry = observability.NewMetricRegistry()
+
+			handler, _ := rf.setup(t)
+			instID := uuid.New()
+			adminID := uuid.New()
+			agentID := uuid.New()
+
+			adminJWT, err := security.GenerateJWT(adminID.String(), instID.String(), "ADMIN", 15*time.Minute)
+			if err != nil {
+				t.Fatalf("GenerateJWT failed: %v", err)
+			}
+
+			// 1. Create a support grant via HTTP POST /api/v1/auth/support/grant
+			grantBody, _ := json.Marshal(map[string]any{
+				"durationMinutes": 30,
+				"scope":           "READ_ONLY",
+			})
+			reqGrant := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", bytes.NewReader(grantBody))
+			reqGrant.RemoteAddr = "198.51.100.20:12345"
+			reqGrant.Header.Set("Content-Type", "application/json")
+			reqGrant.Header.Set("Authorization", "Bearer "+adminJWT)
+			recGrant := httptest.NewRecorder()
+			handler.ServeHTTP(recGrant, reqGrant)
+			if recGrant.Code != http.StatusCreated {
+				t.Fatalf("expected 201 Created from /grant, got %d: %s", recGrant.Code, recGrant.Body.String())
+			}
+			var grantResp struct {
+				Token string `json:"token"`
+			}
+			if err := json.Unmarshal(recGrant.Body.Bytes(), &grantResp); err != nil || grantResp.Token == "" {
+				t.Fatalf("failed to decode grant token: %v", err)
+			}
+
+			// 2. Successful support login via HTTP POST /api/v1/auth/support/login
+			loginBody, _ := json.Marshal(map[string]string{
+				"token":   grantResp.Token,
+				"agentId": agentID.String(),
+			})
+			reqLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
+			reqLogin.RemoteAddr = "198.51.100.21:12345"
+			reqLogin.Header.Set("Content-Type", "application/json")
+			recLogin := httptest.NewRecorder()
+			handler.ServeHTTP(recLogin, reqLogin)
+			if recLogin.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK from /login, got %d: %s", recLogin.Code, recLogin.Body.String())
+			}
+
+			// 3. Scrape /metrics while 1 active session exists
+			reqMetrics1 := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			reqMetrics1.RemoteAddr = "127.0.0.1:9090"
+			recMetrics1 := httptest.NewRecorder()
+			handler.ServeHTTP(recMetrics1, reqMetrics1)
+			if recMetrics1.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK from /metrics, got %d", recMetrics1.Code)
+			}
+			metricsWhileActive := recMetrics1.Body.String()
+			if !strings.Contains(metricsWhileActive, "grantsupport_active_sessions 1") {
+				t.Fatalf("expected grantsupport_active_sessions 1 while session is active, got:\n%s", metricsWhileActive)
+			}
+
+			// 4. Failed support login (reusing single-use token)
+			reqFailedLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
+			reqFailedLogin.RemoteAddr = "198.51.100.22:12345"
+			reqFailedLogin.Header.Set("Content-Type", "application/json")
+			recFailedLogin := httptest.NewRecorder()
+			handler.ServeHTTP(recFailedLogin, reqFailedLogin)
+			if recFailedLogin.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401 from failed /login, got %d", recFailedLogin.Code)
+			}
+
+			// 5. Auth failure (invalid JWT signature on protected endpoint)
+			reqBadAuth := httptest.NewRequest(http.MethodGet, "/api/v1/auth/support/sessions", nil)
+			reqBadAuth.RemoteAddr = "198.51.100.23:12345"
+			reqBadAuth.Header.Set("Authorization", "Bearer invalid.jwt.token")
+			recBadAuth := httptest.NewRecorder()
+			handler.ServeHTTP(recBadAuth, reqBadAuth)
+			if recBadAuth.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401 from invalid JWT, got %d", recBadAuth.Code)
+			}
+
+			// 6. Parameterized route call (/api/v1/auth/support/sessions/{grantId}) to verify low-cardinality route pattern
+			nonExistentGrantID := uuid.New()
+			reqDelSession := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/support/sessions/"+nonExistentGrantID.String(), nil)
+			reqDelSession.RemoteAddr = "198.51.100.20:12345"
+			reqDelSession.Header.Set("Authorization", "Bearer "+adminJWT)
+			recDelSession := httptest.NewRecorder()
+			handler.ServeHTTP(recDelSession, reqDelSession)
+			if recDelSession.Code != http.StatusNotFound {
+				t.Fatalf("expected 404 from DELETE /sessions/{grantId}, got %d", recDelSession.Code)
+			}
+
+			// 7. Revoke all support grants for the tenant
+			reqRevoke := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/revoke", nil)
+			reqRevoke.RemoteAddr = "198.51.100.20:12345"
+			reqRevoke.Header.Set("Authorization", "Bearer "+adminJWT)
+			recRevoke := httptest.NewRecorder()
+			handler.ServeHTTP(recRevoke, reqRevoke)
+			if recRevoke.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK from /revoke, got %d: %s", recRevoke.Code, recRevoke.Body.String())
+			}
+
+			// 8. Rate-limit rejection on /api/v1/auth/support/login (11 requests from same IP)
+			for i := 1; i <= 11; i++ {
+				reqRL := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
+				reqRL.RemoteAddr = "198.51.100.99:54321"
+				reqRL.Header.Set("Content-Type", "application/json")
+				recRL := httptest.NewRecorder()
+				handler.ServeHTTP(recRL, reqRL)
+				if i == 11 && recRL.Code != http.StatusTooManyRequests {
+					t.Fatalf("expected 429 on 11th request, got %d", recRL.Code)
+				}
+			}
+
+			// 9. Scrape /metrics and assert all expected series are non-zero and low-cardinality
+			reqMetrics2 := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			reqMetrics2.RemoteAddr = "127.0.0.1:9090"
+			recMetrics2 := httptest.NewRecorder()
+			handler.ServeHTTP(recMetrics2, reqMetrics2)
+			if recMetrics2.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK from /metrics, got %d", recMetrics2.Code)
+			}
+			body := recMetrics2.Body.String()
+
+			expectedLines := []string{
+				`grantsupport_grants_created_total 1`,
+				`grantsupport_logins_total{status="success"} 1`,
+				`grantsupport_logins_total{status="failure"} 11`,
+				`grantsupport_auth_failures_total{reason="invalid_signature"} 1`,
+				`grantsupport_revocations_total{scope="tenant"} 1`,
+				`grantsupport_rate_limit_exceeded_total{route="/api/v1/auth/support/login"} 1`,
+				`grantsupport_active_sessions 0`,
+				`grantsupport_http_requests_total{route="/api/v1/auth/support/grant",status_code="201"} 1`,
+				`grantsupport_http_requests_total{route="/api/v1/auth/support/sessions/{grantId}",status_code="404"} 1`,
+				`grantsupport_http_request_duration_seconds_count{route="/api/v1/auth/support/grant"} 1`,
+			}
+			for _, exp := range expectedLines {
+				if !strings.Contains(body, exp) {
+					t.Errorf("expected /metrics output to contain %q, got:\n%s", exp, body)
+				}
+			}
+
+			// DB pool open connections gauge should be >= 1
+			if strings.Contains(body, "grantsupport_db_connections_open 0") {
+				t.Errorf("expected grantsupport_db_connections_open > 0 after DB queries, got 0 in:\n%s", body)
+			}
+
+			// Verify zero high-cardinality leakage (no raw UUIDs or client IPs)
+			forbiddenValues := []string{
+				instID.String(),
+				adminID.String(),
+				agentID.String(),
+				nonExistentGrantID.String(),
+				"198.51.100.",
+			}
+			for _, forbidden := range forbiddenValues {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("high-cardinality value %q leaked into /metrics output:\n%s", forbidden, body)
+				}
+			}
+		})
 	}
 }

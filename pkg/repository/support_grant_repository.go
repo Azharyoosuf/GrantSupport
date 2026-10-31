@@ -185,6 +185,27 @@ func (r *SupportGrantRepository) FindActiveSessionsByInstitution(ctx context.Con
 	return grants, nil
 }
 
+// CountActiveSessions returns the total count of currently active redeemed support sessions across the database.
+func (r *SupportGrantRepository) CountActiveSessions(ctx context.Context) (int, error) {
+	client, err := r.GetClient(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	now := time.Now()
+	count, err := client.SupportGrant.Query().
+		Where(
+			supportgrant.IsUsed(true),
+			supportgrant.UsedByIDNotNil(),
+			supportgrant.ExpiresAtGT(now),
+		).
+		Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count active sessions: %w", err)
+	}
+	return count, nil
+}
+
 // RevokeSessionByID marks a specific active support grant as expired (expires_at = now) scoped strictly to institutionID.
 func (r *SupportGrantRepository) RevokeSessionByID(ctx context.Context, institutionID, grantID uuid.UUID) (*ent.SupportGrant, error) {
 	client, err := r.GetClient(ctx)

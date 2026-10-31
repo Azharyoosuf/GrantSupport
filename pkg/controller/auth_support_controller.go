@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -8,6 +9,7 @@ import (
 	"github.com/google/uuid"
 	"grantsupport/pkg/config"
 	pkgctx "grantsupport/pkg/context"
+	"grantsupport/pkg/observability"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
@@ -47,10 +49,12 @@ func (c *SupportGrantController) GrantSupport(w http.ResponseWriter, r *http.Req
 func (c *SupportGrantController) SupportLogin(w http.ResponseWriter, r *http.Request) error {
 	input, err := DecodeAndValidate[SupportLoginInput](r)
 	if err != nil {
+		observability.DefaultRegistry.IncLogins("failure")
 		return err
 	}
 	callerID, err := resolveCallerID(r, input.AgentID)
 	if err != nil {
+		observability.DefaultRegistry.IncLogins("failure")
 		return err
 	}
 
@@ -131,4 +135,12 @@ func (c *SupportGrantController) TerminateSession(w http.ResponseWriter, r *http
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support session terminated successfully."})
 	return nil
+}
+
+// RefreshMetrics refreshes active session and DB connection pool gauges on scrape.
+func (c *SupportGrantController) RefreshMetrics(ctx context.Context, reg *observability.MetricRegistry) {
+	if c == nil || c.grantService == nil {
+		return
+	}
+	c.grantService.RefreshMetrics(ctx, reg)
 }
