@@ -691,19 +691,38 @@ func TestDatabaseQueryPlans(t *testing.T) {
 		defer myDB.Close()
 		t.Log("--- MySQL 8.4 EXPLAIN ---")
 
+		if err := repository.CreateCapabilityTables(ctx, myDB, "mysql"); err != nil {
+			t.Fatalf("MySQL EXPLAIN CreateCapabilityTables failed: %v", err)
+		}
+		revStore := revocation.NewSQLRevocationStore(myDB, "mysql")
+		if err := revStore.RevokeUserSessions(ctx, "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", 2); err != nil {
+			t.Fatalf("MySQL EXPLAIN failed to seed gs_revocations row: %v", err)
+		}
+
 		rows, err := myDB.QueryContext(ctx, `
 			EXPLAIN SELECT token_version FROM gs_revocations 
 			WHERE institution_id = '00000000-0000-0000-0000-000000000001' AND user_id = '00000000-0000-0000-0000-000000000002'
 		`)
-		if err == nil {
-			cols, _ := rows.Columns()
-			t.Logf("MySQL EXPLAIN columns: %v", cols)
-			for rows.Next() {
-				var id, selectType, table, partitions, pType, possibleKeys, key, keyLen, ref, rowsCount, filtered, extra sql.NullString
-				_ = rows.Scan(&id, &selectType, &table, &partitions, &pType, &possibleKeys, &key, &keyLen, &ref, &rowsCount, &filtered, &extra)
-				t.Logf("Table: %s | Type: %s | Key: %s | Rows: %s", table.String, pType.String, key.String, rowsCount.String)
+		if err != nil {
+			t.Fatalf("MySQL EXPLAIN query failed: %v", err)
+		}
+		defer rows.Close()
+
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("MySQL EXPLAIN Columns() failed: %v", err)
+		}
+		t.Logf("MySQL EXPLAIN columns: %v", cols)
+		for rows.Next() {
+			var id, selectType, table, partitions, pType, possibleKeys, key, keyLen, ref, rowsCount, filtered, extra sql.NullString
+			if err := rows.Scan(&id, &selectType, &table, &partitions, &pType, &possibleKeys, &key, &keyLen, &ref, &rowsCount, &filtered, &extra); err != nil {
+				t.Fatalf("MySQL EXPLAIN Scan failed: %v", err)
 			}
-			rows.Close()
+			t.Logf("ID: %s | SelectType: %s | Table: %s | Type: %s | PossibleKeys: %s | Key: %s | KeyLen: %s | Ref: %s | Rows: %s | Filtered: %s | Extra: %s",
+				id.String, selectType.String, table.String, pType.String, possibleKeys.String, key.String, keyLen.String, ref.String, rowsCount.String, filtered.String, extra.String)
+			if table.String == "" || pType.String == "" || key.String == "" {
+				t.Fatalf("expected non-empty MySQL EXPLAIN columns (table=%q, type=%q, key=%q)", table.String, pType.String, key.String)
+			}
 		}
 	}
 }
