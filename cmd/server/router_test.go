@@ -623,3 +623,61 @@ func TestEmbeddedEngineParityWithServer(t *testing.T) {
 		}
 	})
 }
+
+func TestValkeyCacheURLUnsetDoesNotDialLocalValkey(t *testing.T) {
+	prevCfg := config.AppConfig
+	prevEnv, hadEnv := os.LookupEnv("VALKEY_CACHE_URL")
+	t.Cleanup(func() {
+		config.AppConfig = prevCfg
+		if hadEnv {
+			_ = os.Setenv("VALKEY_CACHE_URL", prevEnv)
+		} else {
+			_ = os.Unsetenv("VALKEY_CACHE_URL")
+		}
+	})
+
+	_ = os.Unsetenv("VALKEY_CACHE_URL")
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.ValkeyCacheURL != "" {
+		t.Fatalf("expected cfg.ValkeyCacheURL to be empty when VALKEY_CACHE_URL is unset, got %q", cfg.ValkeyCacheURL)
+	}
+
+	dsn := fmt.Sprintf("file:server_no_valkey_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open failed: %v", err)
+	}
+	defer db.Close()
+
+	if err := repository.CreateCapabilityTables(context.Background(), db, "sqlite"); err != nil {
+		t.Fatalf("CreateCapabilityTables failed: %v", err)
+	}
+
+	_, _, _, redisClient := initCapabilityStores(cfg, db, "sqlite")
+	if redisClient != nil {
+		_ = redisClient.Close()
+		t.Fatalf("expected redisClient to be nil when VALKEY_CACHE_URL is unset, but server dialed 127.0.0.1:6379")
+	}
+
+	healthCtrl := controller.NewHealthController(grantsupport.Version, db, redisClient)
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	rec := httptest.NewRecorder()
+	controller.CatchAsync(healthCtrl.Ready).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /health/ready, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var readyResp struct {
+		Mode   string `json:"mode"`
+		Valkey string `json:"valkey"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &readyResp); err != nil {
+		t.Fatalf("failed to decode /health/ready response: %v", err)
+	}
+	if readyResp.Mode != "sql-only" || readyResp.Valkey != "NOT_CONFIGURED" {
+		t.Fatalf("expected sql-only / NOT_CONFIGURED when VALKEY_CACHE_URL is unset, got mode=%q valkey=%q", readyResp.Mode, readyResp.Valkey)
+	}
+}

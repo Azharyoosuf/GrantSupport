@@ -52,10 +52,7 @@ func LoadConfig() (*Config, error) {
 		dbDialect = "postgres"
 	}
 
-	valkeyCacheURL := os.Getenv("VALKEY_CACHE_URL")
-	if valkeyCacheURL == "" {
-		valkeyCacheURL = "redis://127.0.0.1:6379"
-	}
+	valkeyCacheURL := strings.TrimSpace(os.Getenv("VALKEY_CACHE_URL"))
 
 	port := os.Getenv("PORT")
 	if port == "" {

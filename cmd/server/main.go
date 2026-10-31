@@ -116,30 +116,7 @@ func main() {
 	}
 
 	// Initialize Capability Adapters (Redis if configured, else SQL/Memory Stores)
-	var lockStore ports.LockStore
-	var revocationStore ports.RevocationStore
-	var rateLimiter ports.RateLimiterStore
-	var redisClient *redis.Client
-
-	if cfg.ValkeyCacheURL != "" {
-		valkeyClient, err := cache.NewValkeyClient(cfg.ValkeyCacheURL)
-		if err != nil {
-			slog.Warn("Valkey connection bypass (running with SQL/Memory lock, revocation & rate limiting)", slog.String("error", err.Error()))
-			lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
-			revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
-			rateLimiter = ratelimit.NewMemoryRateLimiter()
-		} else {
-			redisClient = valkeyClient.Client
-			lockStore = lock.NewRedisLockStore(valkeyClient.Client)
-			revocationStore = revocation.NewRedisRevocationStore(valkeyClient.Client)
-			rateLimiter = ratelimit.NewRedisRateLimiter(valkeyClient.Client)
-			slog.Info("Valkey distributed cache, locking & rate limiting initialized successfully")
-		}
-	} else {
-		lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
-		revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
-		rateLimiter = ratelimit.NewMemoryRateLimiter()
-	}
+	lockStore, revocationStore, rateLimiter, redisClient := initCapabilityStores(cfg, sqlDB, dialectName)
 
 	// Initialize Repositories & Services (Standalone single-tenant / dedicated deployment)
 	supportGrantRepo := repository.NewSupportGrantRepository(baseRepo)
@@ -259,6 +236,35 @@ func main() {
 		_ = srv.Shutdown(ctx)
 	}
 	slog.Info("GrantSupport Engine stopped cleanly.")
+}
+
+func initCapabilityStores(cfg *config.Config, sqlDB *sql.DB, dialectName string) (ports.LockStore, ports.RevocationStore, ports.RateLimiterStore, *redis.Client) {
+	var lockStore ports.LockStore
+	var revocationStore ports.RevocationStore
+	var rateLimiter ports.RateLimiterStore
+	var redisClient *redis.Client
+
+	if cfg.ValkeyCacheURL != "" {
+		valkeyClient, err := cache.NewValkeyClient(cfg.ValkeyCacheURL)
+		if err != nil {
+			slog.Warn("Valkey connection bypass (running with SQL/Memory lock, revocation & rate limiting)", slog.String("error", err.Error()))
+			lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
+			revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
+			rateLimiter = ratelimit.NewMemoryRateLimiter()
+		} else {
+			redisClient = valkeyClient.Client
+			lockStore = lock.NewRedisLockStore(valkeyClient.Client)
+			revocationStore = revocation.NewRedisRevocationStore(valkeyClient.Client)
+			rateLimiter = ratelimit.NewRedisRateLimiter(valkeyClient.Client)
+			slog.Info("Valkey distributed cache, locking & rate limiting initialized successfully")
+		}
+	} else {
+		lockStore = lock.NewSQLLockStore(sqlDB, dialectName)
+		revocationStore = revocation.NewSQLRevocationStore(sqlDB, dialectName)
+		rateLimiter = ratelimit.NewMemoryRateLimiter()
+	}
+
+	return lockStore, revocationStore, rateLimiter, redisClient
 }
 
 func newServerRouter(
