@@ -167,70 +167,7 @@ func main() {
 	healthController := controller.NewHealthController(grantsupport.Version, sqlDB, redisClient)
 
 	// Router Setup
-	r := chi.NewRouter()
-	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
-	r.Use(chimiddleware.Logger)
-	r.Use(chimiddleware.Recoverer)
-	r.Use(middleware.CorrelationIDMiddleware)
-	r.Use(middleware.SecurityHeadersMiddleware)
-
-	// Public Health & Readiness Probes
-	r.Get("/health", controller.CatchAsync(healthController.Live))
-	r.Get("/health/live", controller.CatchAsync(healthController.Live))
-	r.Get("/health/ready", controller.CatchAsync(healthController.Ready))
-
-	// Prometheus Metrics Scraper Endpoint
-	r.Get("/metrics", observability.DefaultRegistry.Handler())
-
-	// Public JWKS Endpoint
-	r.Get("/.well-known/jwks.json", controller.CatchAsync(jwksController.GetJWKS))
-
-	// Public Support Agent Login Endpoint (Rate limited to 10 attempts per minute per IP)
-	r.With(
-		middleware.RateLimitMiddleware(rateLimiter, 10, 60),
-	).Post("/api/v1/auth/support/login", controller.CatchAsync(grantController.SupportLogin))
-
-	// Authenticated Customer Admin Endpoints
-	r.Group(func(r chi.Router) {
-		r.Use(middleware.NewAuthMiddleware(revocationStore))
-
-		// Customer Admin Direct Grant Endpoints
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-			middleware.RateLimitMiddleware(rateLimiter, 20, 60),
-		).Post("/api/v1/auth/support/grant", controller.CatchAsync(grantController.GrantSupport))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-			middleware.RateLimitMiddleware(rateLimiter, 10, 60),
-		).Post("/api/v1/auth/support/revoke", controller.CatchAsync(grantController.RevokeSupport))
-
-		// Active Session Management
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-		).Get("/api/v1/auth/support/sessions", controller.CatchAsync(grantController.GetActiveSessions))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-		).Delete("/api/v1/auth/support/sessions/{grantId}", controller.CatchAsync(grantController.TerminateSession))
-
-		// Cryptographic Audit Ledger APIs
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-		).Get("/api/v1/audit/events", controller.CatchAsync(auditController.GetAuditEvents))
-
-		r.With(
-			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
-		).Post("/api/v1/audit/verify", controller.CatchAsync(auditController.VerifyAuditChain))
-	})
-
-	// Authenticated Support Agent Logout Endpoint
-	r.Group(func(r chi.Router) {
-		r.Use(middleware.NewAuthMiddleware(revocationStore))
-		r.Use(middleware.RequireRoles("SUPPORT_AGENT"))
-		r.Post("/api/v1/auth/support/logout", controller.CatchAsync(grantController.SupportLogout))
-	})
+	r := newServerRouter(grantController, auditController, jwksController, healthController, revocationStore, rateLimiter)
 
 	port := cfg.Port
 	if port == "" {
@@ -322,4 +259,79 @@ func main() {
 		_ = srv.Shutdown(ctx)
 	}
 	slog.Info("GrantSupport Engine stopped cleanly.")
+}
+
+func newServerRouter(
+	grantController *controller.SupportGrantController,
+	auditController *controller.AuditController,
+	jwksController *controller.JWKSController,
+	healthController *controller.HealthController,
+	revocationStore ports.RevocationStore,
+	rateLimiter ports.RateLimiterStore,
+) *chi.Mux {
+	r := chi.NewRouter()
+	r.Use(chimiddleware.RequestID)
+	r.Use(chimiddleware.Logger)
+	r.Use(chimiddleware.Recoverer)
+	r.Use(middleware.CorrelationIDMiddleware)
+	r.Use(middleware.SecurityHeadersMiddleware)
+
+	// Public Health & Readiness Probes
+	r.Get("/health", controller.CatchAsync(healthController.Live))
+	r.Get("/health/live", controller.CatchAsync(healthController.Live))
+	r.Get("/health/ready", controller.CatchAsync(healthController.Ready))
+
+	// Prometheus Metrics Scraper Endpoint
+	r.Get("/metrics", observability.DefaultRegistry.Handler())
+
+	// Public JWKS Endpoint
+	r.Get("/.well-known/jwks.json", controller.CatchAsync(jwksController.GetJWKS))
+
+	// Public Support Agent Login Endpoint (Rate limited to 10 attempts per minute per IP)
+	r.With(
+		middleware.RateLimitMiddleware(rateLimiter, 10, 60),
+	).Post("/api/v1/auth/support/login", controller.CatchAsync(grantController.SupportLogin))
+
+	// Authenticated Customer Admin Endpoints
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.NewAuthMiddleware(revocationStore))
+
+		// Customer Admin Direct Grant Endpoints
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(rateLimiter, 20, 60),
+		).Post("/api/v1/auth/support/grant", controller.CatchAsync(grantController.GrantSupport))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+			middleware.RateLimitMiddleware(rateLimiter, 10, 60),
+		).Post("/api/v1/auth/support/revoke", controller.CatchAsync(grantController.RevokeSupport))
+
+		// Active Session Management
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Get("/api/v1/auth/support/sessions", controller.CatchAsync(grantController.GetActiveSessions))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Delete("/api/v1/auth/support/sessions/{grantId}", controller.CatchAsync(grantController.TerminateSession))
+
+		// Cryptographic Audit Ledger APIs
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Get("/api/v1/audit/events", controller.CatchAsync(auditController.GetAuditEvents))
+
+		r.With(
+			middleware.RequireRoles("ADMIN", "ADMINISTRATOR", "OWNER", "OPERATOR"),
+		).Post("/api/v1/audit/verify", controller.CatchAsync(auditController.VerifyAuditChain))
+	})
+
+	// Authenticated Support Agent Logout Endpoint
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.NewAuthMiddleware(revocationStore))
+		r.Use(middleware.RequireRoles("SUPPORT_AGENT"))
+		r.Post("/api/v1/auth/support/logout", controller.CatchAsync(grantController.SupportLogout))
+	})
+
+	return r
 }

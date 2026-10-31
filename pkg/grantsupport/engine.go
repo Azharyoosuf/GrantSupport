@@ -232,7 +232,6 @@ func (e *Engine) GetAuditEvents(ctx context.Context, institutionID uuid.UUID, li
 func (e *Engine) HTTPHandler() http.Handler {
 	r := chi.NewRouter()
 	r.Use(chimiddleware.RequestID)
-	r.Use(chimiddleware.RealIP)
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.CorrelationIDMiddleware)
