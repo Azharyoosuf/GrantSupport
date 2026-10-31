@@ -91,7 +91,7 @@ func BenchmarkCrypto_TokenGeneration(b *testing.B) {
 	b.ReportAllocs()
 	buf := make([]byte, 32)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = rand.Read(buf)
 		_ = hex.EncodeToString(buf)
 	}
@@ -101,7 +101,7 @@ func BenchmarkCrypto_SHA256Hashing(b *testing.B) {
 	b.ReportAllocs()
 	token := "6ba7b810-9dad-11d1-80b4-00c04fd430c8_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		h := sha256.Sum256([]byte(token))
 		_ = hex.EncodeToString(h[:])
 	}
@@ -115,7 +115,7 @@ func BenchmarkValidation_GrantSupportInput(b *testing.B) {
 		Scope:           "FULL_ACCESS",
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = validate.Struct(input)
 	}
 }
@@ -723,6 +723,9 @@ func TestDatabaseQueryPlans(t *testing.T) {
 			if table.String == "" || pType.String == "" || key.String == "" {
 				t.Fatalf("expected non-empty MySQL EXPLAIN columns (table=%q, type=%q, key=%q)", table.String, pType.String, key.String)
 			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("MySQL EXPLAIN row iteration failed: %v", err)
 		}
 	}
 }
