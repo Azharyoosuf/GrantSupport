@@ -34,6 +34,9 @@ func TestWriteRFC7807(t *testing.T) {
 			t.Fatalf("Failed to unmarshal ProblemDetails response: %v", err)
 		}
 
+		if pd.Type != "urn:grantsupport:error:invalid_input" {
+			t.Errorf("Expected type urn:grantsupport:error:invalid_input, got %s", pd.Type)
+		}
 		if pd.Title != "INVALID_INPUT" {
 			t.Errorf("Expected title INVALID_INPUT, got %s", pd.Title)
 		}
@@ -46,5 +49,6 @@ func TestWriteRFC7807(t *testing.T) {
 		if len(pd.InvalidParams) != 1 || pd.InvalidParams[0].Name != "duration_minutes" {
 			t.Errorf("Expected invalid_params for duration_minutes, got %+v", pd.InvalidParams)
 		}
+		t.Logf("RFC 9457 ProblemDetails JSON response: %s", rr.Body.String())
 	})
 }

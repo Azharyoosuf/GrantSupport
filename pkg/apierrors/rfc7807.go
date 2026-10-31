@@ -32,7 +32,7 @@ func (pd *ProblemDetails) Error() string {
 // NewProblemDetails instantiates a custom RFC 9457 Problem Details error payload.
 func NewProblemDetails(status int, errType, title, detail, instance, correlationID string, invalidParams ...InvalidParam) *ProblemDetails {
 	if errType == "" {
-		errType = "https://grantsupport.io/errors/" + strings.ToLower(title)
+		errType = "urn:grantsupport:error:" + strings.ToLower(title)
 	}
 	return &ProblemDetails{
 		Type:          errType,

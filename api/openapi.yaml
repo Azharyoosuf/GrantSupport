@@ -668,7 +668,7 @@ components:
           type: string
           format: uri
           description: A URI reference that identifies the problem type.
-          example: https://grantsupport.io/errors/validation-failed
+          example: urn:grantsupport:error:validation-failed
         title:
           type: string
           description: A short, human-readable summary of the problem type.

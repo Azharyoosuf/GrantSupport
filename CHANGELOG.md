@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - **MariaDB `whitelisted_ips` CHECK Constraint Normalization (`000005_normalize_whitelisted_ips_check`)**: Normalized `gs_support_grants.whitelisted_ips` on MariaDB from `CHECK (whitelisted_ips IS NULL OR JSON_VALID(whitelisted_ips))` to `CHECK (json_valid(whitelisted_ips))` so MariaDB users with `AUTO_MIGRATE` enabled no longer crash at startup on `gs_support_grants` (`Error 1091: Can't DROP CONSTRAINT whitelisted_ips`).
+- **RFC 9457 Problem Details `type` URN**: Changed the default `"type"` value in RFC 9457 `application/problem+json` error responses from `https://grantsupport.io/errors/<code>` to `urn:grantsupport:error:<code>`.
 
 ---
 

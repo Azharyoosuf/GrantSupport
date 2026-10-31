@@ -119,7 +119,7 @@ func WriteProblemDetailsError(w http.ResponseWriter, r *http.Request, status int
 		correlationID = r.Header.Get("X-Correlation-ID")
 	}
 	payload := map[string]any{
-		"type":     "https://grantsupport.io/errors/" + strings.ToLower(code),
+		"type":     "urn:grantsupport:error:" + strings.ToLower(code),
 		"title":    code,
 		"status":   status,
 		"detail":   detail,
