@@ -94,6 +94,8 @@ GrantSupport is designed as a lightweight application-layer service. In the `v0.
 * **Startup to Ready**: **< 200 ms**.
 
 ### 5.2 Reference Performance Baseline
+
+#### Environment A — Windows 11 (`x86_64`)
 *Measurements gathered in reference validation environment (12th Gen Intel Core i5-12450H, 16 GB RAM, Windows 11 / Docker Linux container).*
 
 | Operation | Environment | Throughput | p50 Latency | p95 Latency | p99 Latency |
@@ -105,6 +107,23 @@ GrantSupport is designed as a lightweight application-layer service. In the `v0.
 | **CreateSupportGrant** | MySQL 8.4 (Network) | 29.9 req/s | 32.97 ms | 43.46 ms | — |
 | **SupportLogin (Redeem)** | MySQL 8.4 (Network) | 38.7 req/s | 25.02 ms | 35.29 ms | — |
 | **Concurrency Scaling** | 1 $\rightarrow$ 250 Workers | 296.6 $\rightarrow$ 922.2 req/s | — | — | 0 Errors |
+
+#### Environment B — macOS Apple Silicon (`ARM64`)
+*Measurements gathered in reference validation environment (Apple M5, 24 GB Unified Memory, macOS ARM64 / Docker Linux container) via `TestRealDatabaseBenchmarks` and `TestConcurrencyBenchmarks` (embedded Go engine calling embedded in-memory SQLite vs. real PostgreSQL 16, MySQL 8.4, and MariaDB 11.4 Docker database containers).*
+
+| Operation | Environment (Engine + Backend) | Throughput | p50 Latency | p95 Latency | p99 Latency |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **CreateSupportGrant** | Embedded Engine + SQLite (In-Memory) | 13,945.1 req/s | 0.07 ms | 0.08 ms | 0.10 ms |
+| **SupportLogin (Redeem)** | Embedded Engine + SQLite (In-Memory) | 1,399.8 req/s | 0.71 ms | 0.74 ms | 0.96 ms |
+| **RevokeSupportGrant** | Embedded Engine + SQLite (In-Memory) | 7,339.7 req/s | 0.12 ms | 0.26 ms | 0.26 ms |
+| **IsTokenRevoked** | Embedded Engine + SQL In-Memory | 282,418.9 req/s | < 0.01 ms | < 0.01 ms | 0.02 ms |
+| **CreateSupportGrant** | Embedded Engine + PostgreSQL 16 (Docker Network) | 243.5 req/s | 3.47 ms | 10.35 ms | 15.17 ms |
+| **SupportLogin (Redeem)** | Embedded Engine + PostgreSQL 16 (Docker Network) | 363.2 req/s | 2.11 ms | 5.45 ms | 8.67 ms |
+| **CreateSupportGrant** | Embedded Engine + MySQL 8.4 (Docker Network) | 216.7 req/s | 4.31 ms | 6.24 ms | 7.45 ms |
+| **SupportLogin (Redeem)** | Embedded Engine + MySQL 8.4 (Docker Network) | 240.9 req/s | 4.31 ms | 5.76 ms | 6.13 ms |
+| **CreateSupportGrant** | Embedded Engine + MariaDB 11.4 (Docker Network) | 366.9 req/s | 2.55 ms | 3.30 ms | 8.26 ms |
+| **SupportLogin (Redeem)** | Embedded Engine + MariaDB 11.4 (Docker Network) | 451.3 req/s | 2.05 ms | 2.59 ms | 5.78 ms |
+| **Concurrency Scaling** | 1 $\rightarrow$ 250 Workers (Embedded Engine + SQLite In-Memory) | 1,338.3 $\rightarrow$ 4,739.8 req/s | — | — | 0 Errors |
 
 > [!NOTE]
 > These figures are reference measurements from the specific `v0.1.0-beta.3` validation environment. They are **not** universal performance guarantees or production capacity claims. Real-world performance depends heavily on database engine, network latency, disk I/O, and deployment topology.
