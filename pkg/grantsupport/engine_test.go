@@ -185,17 +185,26 @@ func TestEngineWithEntClientOwnership(t *testing.T) {
 
 func TestEngineWithPgxPoolOwnership(t *testing.T) {
 	connStr := os.Getenv("TEST_POSTGRES_URL")
-	if connStr == "" {
-		t.Skip("Skipping TestEngineWithPgxPoolOwnership: TEST_POSTGRES_URL not configured")
+	explicitEnv := connStr != ""
+	if !explicitEnv {
+		t.Skipf("Skipping TestEngineWithPgxPoolOwnership: TEST_POSTGRES_URL not configured")
+		return
 	}
 
 	ctx := context.Background()
 	pool, err := pgxpool.New(ctx, connStr)
 	if err != nil {
+		if explicitEnv {
+			t.Fatalf("TestEngineWithPgxPoolOwnership failed to create pgxpool: %v", err)
+		}
 		t.Skipf("Skipping TestEngineWithPgxPoolOwnership (failed to create pgxpool): %v", err)
 		return
 	}
 	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		if explicitEnv {
+			t.Fatalf("TestEngineWithPgxPoolOwnership failed (PostgreSQL not reachable or credentials mismatch): %v", err)
+		}
 		t.Skipf("Skipping TestEngineWithPgxPoolOwnership (PostgreSQL not reachable or credentials mismatch): %v", err)
 		return
 	}

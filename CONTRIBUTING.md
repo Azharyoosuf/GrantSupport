@@ -17,7 +17,7 @@ Please be respectful, constructive, and collaborative in all issues, pull reques
 ### Prerequisites
 - **Go**: Version `1.22` or later
 - **Git**
-- **Docker & Docker Compose** (for running PostgreSQL 16, MySQL 8.4, MariaDB 11.4, and Valkey 7.2 test backends)
+- **Docker & Docker Compose** (for running PostgreSQL 16+, MySQL 8.0+, MariaDB 10.5+, and Valkey 7.2 test backends)
 - **Make** (optional, for standard build targets)
 
 ### Clone & Build

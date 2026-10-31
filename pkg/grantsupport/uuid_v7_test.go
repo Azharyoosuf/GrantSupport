@@ -66,12 +66,16 @@ func TestUUIDv7_EntityGenerationLifecycle(t *testing.T) {
 	for _, target := range targets {
 		t.Run(target.name, func(t *testing.T) {
 			dsn := target.defaultDSN
-			if target.envVar != "" && os.Getenv(target.envVar) != "" {
+			explicitEnv := target.envVar != "" && os.Getenv(target.envVar) != ""
+			if explicitEnv {
 				dsn = os.Getenv(target.envVar)
 			}
 
 			db, err := sql.Open(target.driver, dsn)
 			if err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Failed to open database (%s): %v", target.name, target.envVar, err)
+				}
 				t.Skipf("Skipping %s: %v", target.name, err)
 				return
 			}
@@ -80,6 +84,9 @@ func TestUUIDv7_EntityGenerationLifecycle(t *testing.T) {
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			if err := db.PingContext(pingCtx); err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Database unreachable (%s): %v", target.name, target.envVar, err)
+				}
 				t.Skipf("Skipping %s (unreachable on %s): %v", target.name, dsn, err)
 				return
 			}

@@ -63,7 +63,7 @@ GrantSupport operates in two primary deployment topologies:
 ### 2.3 Data Access Layer (`pkg/repository/`)
 * **`SupportGrantRepository`**: Typed CRUD operations over `gs_support_grants` table with strict multi-tenant `institution_id` filtering.
 * **`SecurityAuditRepository`**: Chained append-only audit event logging to `gs_audit_events` with SHA-256 hash chaining and transaction management.
-* **Database Drivers**: Reference support for PostgreSQL 16+ via `jackc/pgx/v5`, MySQL 8.4+ and MariaDB 11.4+ via standard Go relational drivers, and SQLite 3 via pure Go `modernc.org/sqlite`.
+* **Database Drivers**: Reference support for PostgreSQL 16+ via `jackc/pgx/v5`, MySQL 8.0+ and MariaDB 10.5+ via standard Go relational drivers, and SQLite 3 via pure Go `modernc.org/sqlite`.
 
 ### 2.4 Capability Adapters (`pkg/adapters/`)
 Implements capability interfaces defined in `pkg/ports/`:

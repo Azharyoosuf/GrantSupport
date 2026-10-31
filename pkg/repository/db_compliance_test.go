@@ -277,18 +277,26 @@ func pingWithRetry(db *sql.DB) error {
 // TestDatabaseComplianceSuite_PostgreSQL runs when TEST_POSTGRES_URL environment variable is provided.
 func TestDatabaseComplianceSuite_PostgreSQL(t *testing.T) {
 	connStr := os.Getenv("TEST_POSTGRES_URL")
-	if connStr == "" {
-		t.Skip("Skipping PostgreSQL compliance test: TEST_POSTGRES_URL not configured")
+	explicitEnv := connStr != ""
+	if !explicitEnv {
+		t.Skipf("Skipping PostgreSQL compliance test: TEST_POSTGRES_URL not configured")
+		return
 	}
 
 	db, err := sql.Open("pgx", connStr)
 	if err != nil {
+		if explicitEnv {
+			t.Fatalf("PostgreSQL compliance test failed to open driver: %v", err)
+		}
 		t.Skipf("Skipping PostgreSQL compliance test (failed to open driver): %v", err)
 		return
 	}
 	defer db.Close()
 
 	if err := pingWithRetry(db); err != nil {
+		if explicitEnv {
+			t.Fatalf("PostgreSQL compliance test failed (PostgreSQL not reachable or credentials mismatch): %v", err)
+		}
 		t.Skipf("Skipping PostgreSQL compliance test (PostgreSQL not reachable or credentials mismatch): %v", err)
 		return
 	}
@@ -299,18 +307,26 @@ func TestDatabaseComplianceSuite_PostgreSQL(t *testing.T) {
 // TestDatabaseComplianceSuite_MySQL runs when TEST_MYSQL_URL environment variable is provided.
 func TestDatabaseComplianceSuite_MySQL(t *testing.T) {
 	connStr := os.Getenv("TEST_MYSQL_URL")
-	if connStr == "" {
-		t.Skip("Skipping MySQL compliance test: TEST_MYSQL_URL not configured")
+	explicitEnv := connStr != ""
+	if !explicitEnv {
+		t.Skipf("Skipping MySQL compliance test: TEST_MYSQL_URL not configured")
+		return
 	}
 
 	db, err := sql.Open("mysql", connStr)
 	if err != nil {
+		if explicitEnv {
+			t.Fatalf("MySQL compliance test failed to open driver: %v", err)
+		}
 		t.Skipf("Skipping MySQL compliance test (failed to open driver): %v", err)
 		return
 	}
 	defer db.Close()
 
 	if err := pingWithRetry(db); err != nil {
+		if explicitEnv {
+			t.Fatalf("MySQL compliance test failed (MySQL not reachable or credentials mismatch): %v", err)
+		}
 		t.Skipf("Skipping MySQL compliance test (MySQL not reachable or credentials mismatch): %v", err)
 		return
 	}
@@ -321,18 +337,26 @@ func TestDatabaseComplianceSuite_MySQL(t *testing.T) {
 // TestDatabaseComplianceSuite_MariaDB runs when TEST_MARIADB_URL environment variable is provided.
 func TestDatabaseComplianceSuite_MariaDB(t *testing.T) {
 	connStr := os.Getenv("TEST_MARIADB_URL")
-	if connStr == "" {
-		t.Skip("Skipping MariaDB compliance test: TEST_MARIADB_URL not configured")
+	explicitEnv := connStr != ""
+	if !explicitEnv {
+		t.Skipf("Skipping MariaDB compliance test: TEST_MARIADB_URL not configured")
+		return
 	}
 
 	db, err := sql.Open("mysql", connStr)
 	if err != nil {
+		if explicitEnv {
+			t.Fatalf("MariaDB compliance test failed to open driver: %v", err)
+		}
 		t.Skipf("Skipping MariaDB compliance test (failed to open driver): %v", err)
 		return
 	}
 	defer db.Close()
 
 	if err := pingWithRetry(db); err != nil {
+		if explicitEnv {
+			t.Fatalf("MariaDB compliance test failed (MariaDB not reachable or credentials mismatch): %v", err)
+		}
 		t.Skipf("Skipping MariaDB compliance test (MariaDB not reachable or credentials mismatch): %v", err)
 		return
 	}

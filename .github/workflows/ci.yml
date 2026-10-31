@@ -11,8 +11,17 @@ permissions:
 
 jobs:
   lint-and-test:
-    name: Build, Vet, Test & Race Detector Matrix
+    name: Build, Vet, Test & Race Detector Matrix (PG 16 / MySQL ${{ matrix.mysql_version }} / MariaDB ${{ matrix.mariadb_version }})
     runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - mysql_version: "8.4"
+            mariadb_version: "11.4"
+          - mysql_version: "8.0"
+            mariadb_version: "10.5"
 
     services:
       postgres:
@@ -30,7 +39,7 @@ jobs:
           --health-retries 10
 
       mysql:
-        image: mysql:8.4
+        image: mysql:${{ matrix.mysql_version }}
         env:
           MYSQL_ROOT_PASSWORD: rootsecret
           MYSQL_DATABASE: grantsupport
@@ -42,10 +51,10 @@ jobs:
           --health-cmd "mysqladmin ping -h localhost -u grantsupport -psecretpassword"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
       mariadb:
-        image: mariadb:11.4
+        image: mariadb:${{ matrix.mariadb_version }}
         env:
           MARIADB_ROOT_PASSWORD: rootsecret
           MARIADB_DATABASE: grantsupport
@@ -57,7 +66,7 @@ jobs:
           --health-cmd "healthcheck.sh --connect --innodb_initialized"
           --health-interval 5s
           --health-timeout 5s
-          --health-retries 5
+          --health-retries 10
 
       valkey:
         image: valkey/valkey:7.2-alpine
@@ -98,6 +107,12 @@ jobs:
 
       - name: Static Analysis (go vet)
         run: go vet ./...
+
+      - name: Verify Live Database Connectivity (Fail if Unreachable)
+        run: |
+          for port in 5432 3306 3307; do
+            nc -z localhost "$port" || { echo "Error: database service on localhost:$port is unreachable"; exit 1; }
+          done
 
       - name: Unit, Concurrency & Cross-Database Matrix Suite (go test)
         env:

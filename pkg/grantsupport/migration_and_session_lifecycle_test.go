@@ -419,12 +419,16 @@ func TestCrossDialectLiveDatabaseUpgrade(t *testing.T) {
 	for _, d := range dialects {
 		t.Run(d.name, func(t *testing.T) {
 			dsn := os.Getenv(d.envVar)
-			if dsn == "" {
+			explicitEnv := dsn != ""
+			if !explicitEnv {
 				dsn = d.defaultDSN
 			}
 
 			db, err := sql.Open(d.driver, dsn)
 			if err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Failed to open database (%s): %v", d.name, d.envVar, err)
+				}
 				t.Skipf("Skipping %s live test: %v", d.name, err)
 				return
 			}
@@ -433,6 +437,9 @@ func TestCrossDialectLiveDatabaseUpgrade(t *testing.T) {
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			if err := db.PingContext(pingCtx); err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Database unreachable (%s): %v", d.name, d.envVar, err)
+				}
 				t.Skipf("Skipping %s live test (database unreachable): %v", d.name, err)
 				return
 			}
@@ -812,12 +819,16 @@ func TestSQLMigrationFiles_FullLifecycle(t *testing.T) {
 	for _, d := range liveDialects {
 		t.Run(d.name, func(t *testing.T) {
 			dsn := os.Getenv(d.envVar)
-			if dsn == "" {
+			explicitEnv := dsn != ""
+			if !explicitEnv {
 				dsn = d.defaultDSN
 			}
 
 			probeDB, err := sql.Open(d.driver, dsn)
 			if err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Failed to open physical migration test DB (%s): %v", d.name, d.envVar, err)
+				}
 				t.Skipf("Skipping %s physical migration test: %v", d.name, err)
 				return
 			}
@@ -826,6 +837,9 @@ func TestSQLMigrationFiles_FullLifecycle(t *testing.T) {
 			cancel()
 			_ = probeDB.Close()
 			if err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Physical migration test DB unreachable (%s): %v", d.name, d.envVar, err)
+				}
 				t.Skipf("Skipping %s physical migration test (database unreachable): %v", d.name, err)
 				return
 			}

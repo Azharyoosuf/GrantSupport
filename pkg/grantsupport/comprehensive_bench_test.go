@@ -165,12 +165,16 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 	for _, target := range targets {
 		t.Run(target.name, func(t *testing.T) {
 			dsn := target.defaultDSN
-			if target.envVar != "" && os.Getenv(target.envVar) != "" {
+			explicitEnv := target.envVar != "" && os.Getenv(target.envVar) != ""
+			if explicitEnv {
 				dsn = os.Getenv(target.envVar)
 			}
 
 			db, err := sql.Open(target.driver, dsn)
 			if err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Failed to open database (%s): %v", target.name, target.envVar, err)
+				}
 				t.Skipf("Skipping %s: %v", target.name, err)
 				return
 			}
@@ -183,6 +187,9 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			if err := db.PingContext(pingCtx); err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Database unreachable (%s): %v", target.name, target.envVar, err)
+				}
 				t.Skipf("Skipping %s (unreachable on %s): %v", target.name, dsn, err)
 				return
 			}
@@ -602,11 +609,23 @@ func TestDatabaseQueryPlans(t *testing.T) {
 
 	// 1. PostgreSQL EXPLAIN ANALYZE
 	pgDSN := "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable"
+	pgExplicit := false
 	if env := os.Getenv("TEST_POSTGRES_URL"); env != "" {
 		pgDSN = env
+		pgExplicit = true
 	}
 
 	pgDB, err := sql.Open("pgx", pgDSN)
+	if err != nil && pgExplicit {
+		t.Fatalf("PostgreSQL EXPLAIN failed to open database (TEST_POSTGRES_URL): %v", err)
+	}
+	if err == nil {
+		pingErr := pgDB.Ping()
+		if pingErr != nil && pgExplicit {
+			_ = pgDB.Close()
+			t.Fatalf("PostgreSQL EXPLAIN database unreachable (TEST_POSTGRES_URL): %v", pingErr)
+		}
+	}
 	if err == nil && pgDB.Ping() == nil {
 		defer pgDB.Close()
 		t.Log("--- PostgreSQL 16 EXPLAIN (ANALYZE, BUFFERS) ---")
@@ -649,11 +668,23 @@ func TestDatabaseQueryPlans(t *testing.T) {
 
 	// 2. MySQL EXPLAIN
 	myDSN := "grantsupport:secretpassword@tcp(127.0.0.1:3306)/grantsupport?parseTime=true"
+	myExplicit := false
 	if env := os.Getenv("TEST_MYSQL_URL"); env != "" {
 		myDSN = env
+		myExplicit = true
 	}
 
 	myDB, err := sql.Open("mysql", myDSN)
+	if err != nil && myExplicit {
+		t.Fatalf("MySQL EXPLAIN failed to open database (TEST_MYSQL_URL): %v", err)
+	}
+	if err == nil {
+		pingErr := myDB.Ping()
+		if pingErr != nil && myExplicit {
+			_ = myDB.Close()
+			t.Fatalf("MySQL EXPLAIN database unreachable (TEST_MYSQL_URL): %v", pingErr)
+		}
+	}
 	if err == nil && myDB.Ping() == nil {
 		defer myDB.Close()
 		t.Log("--- MySQL 8.4 EXPLAIN ---")
