@@ -586,7 +586,7 @@ func runDialectPhysicalMigrationsTest(t *testing.T, ctx context.Context, dialect
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
 			t.Fatalf("[%s] Expected gs_access_requests to NOT exist after 000004-000006 UP", dialect)
 		}
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM " + "gs_replays").Scan(&count); err == nil {
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+"gs_replays").Scan(&count); err == nil {
 			t.Fatalf("[%s] Expected dropped replay table to NOT exist after 000006 UP", dialect)
 		}
 
@@ -594,7 +594,7 @@ func runDialectPhysicalMigrationsTest(t *testing.T, ctx context.Context, dialect
 		if err := execSQLStatements(ctx, db, down6); err != nil {
 			t.Fatalf("[%s] 000006 DOWN failed: %v", dialect, err)
 		}
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM " + "gs_replays").Scan(&count); err != nil || count != 0 {
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+"gs_replays").Scan(&count); err != nil || count != 0 {
 			t.Fatalf("[%s] Expected empty replay table after 000006 DOWN, got count=%d, err=%v", dialect, count, err)
 		}
 		if err := execSQLStatements(ctx, db, down5); err != nil {
@@ -629,7 +629,7 @@ func runDialectPhysicalMigrationsTest(t *testing.T, ctx context.Context, dialect
 		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM gs_access_requests").Scan(&count); err == nil {
 			t.Fatalf("[%s] Expected gs_access_requests to be dropped after Re-UP 000004-000006", dialect)
 		}
-		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM " + "gs_replays").Scan(&count); err == nil {
+		if err := db.QueryRowContext(ctx, "SELECT count(*) FROM "+"gs_replays").Scan(&count); err == nil {
 			t.Fatalf("[%s] Expected replay table to be dropped after Re-UP 000006", dialect)
 		}
 
