@@ -52,7 +52,7 @@ func (c *SupportGrantController) SupportLogin(w http.ResponseWriter, r *http.Req
 		observability.DefaultRegistry.IncLogins("failure")
 		return err
 	}
-	callerID, err := resolveCallerID(r, input.AgentID)
+	callerID, err := parseRequiredAgentID(input.AgentID)
 	if err != nil {
 		observability.DefaultRegistry.IncLogins("failure")
 		return err

@@ -2,9 +2,9 @@ package controller
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
-	pkgctx "grantsupport/pkg/context"
 )
 
 // GrantSupportInput captures support delegation duration, scopes, and IP restrictions.
@@ -17,23 +17,21 @@ type GrantSupportInput struct {
 	WhitelistedIPs []string `json:"whitelistedIps,omitempty"`
 }
 
-// SupportLoginInput captures support token payload and explicit agent UUID.
+// SupportLoginInput captures support token payload and required explicit agent UUID.
 type SupportLoginInput struct {
 	Token   string `json:"token" validate:"required"`
-	AgentID string `json:"agentId,omitempty" validate:"omitempty,uuid"`
+	AgentID string `json:"agentId"`
 }
 
-// resolveCallerID extracts the effective caller UUID from explicit body, tenant context, or user context.
-func resolveCallerID(r *http.Request, agentID string) (uuid.UUID, error) {
-	if agentID != "" {
-		parsed, err := uuid.Parse(agentID)
-		if err != nil {
-			return uuid.Nil, NewAppError(http.StatusBadRequest, "INVALID_AGENT_ID", "agentId must be a valid UUID")
-		}
-		return parsed, nil
+// parseRequiredAgentID validates that an explicit, non-nil agentId UUID was supplied in the request body.
+func parseRequiredAgentID(agentID string) (uuid.UUID, error) {
+	trimmed := strings.TrimSpace(agentID)
+	if trimmed == "" {
+		return uuid.Nil, NewAppError(http.StatusBadRequest, "INVALID_INPUT", "agentId is required and must be a valid non-nil UUID")
 	}
-	if tenant, ok := pkgctx.GetTenant(r.Context()); ok && tenant != nil {
-		return tenant.UserID, nil
+	parsed, err := uuid.Parse(trimmed)
+	if err != nil || parsed == uuid.Nil {
+		return uuid.Nil, NewAppError(http.StatusBadRequest, "INVALID_INPUT", "agentId is required and must be a valid non-nil UUID")
 	}
-	return uuid.Nil, NewAppError(http.StatusBadRequest, "AGENT_ID_REQUIRED", "Explicit agentId UUID must be provided in request body")
+	return parsed, nil
 }

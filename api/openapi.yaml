@@ -493,6 +493,7 @@ components:
       type: object
       required:
         - token
+        - agentId
       properties:
         token:
           type: string
@@ -501,7 +502,7 @@ components:
         agentId:
           type: string
           format: uuid
-          description: Optional in the schema when caller context already carries an authenticated user UUID; required for unauthenticated support login requests.
+          description: Required explicit UUID of the support agent claiming the delegation token.
           example: 7f4c935b-16d7-4f9e-a8f2-39c4a852b719
 
     SupportLoginResponse:

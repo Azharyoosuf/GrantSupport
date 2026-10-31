@@ -25,6 +25,7 @@ import (
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/cache"
 	"grantsupport/pkg/config"
+	pkgctx "grantsupport/pkg/context"
 	"grantsupport/pkg/controller"
 	"grantsupport/pkg/grantsupport"
 	"grantsupport/pkg/observability"
@@ -898,6 +899,121 @@ func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
 				if strings.Contains(body, forbidden) {
 					t.Errorf("high-cardinality value %q leaked into /metrics output:\n%s", forbidden, body)
 				}
+			}
+		})
+	}
+}
+
+func TestSupportLogin_AgentIDRequired_AndSessionIsolation(t *testing.T) {
+	if err := security.SetupTestRSAKeys(); err != nil {
+		t.Fatalf("SetupTestRSAKeys failed: %v", err)
+	}
+
+	for _, rf := range fullRouterFactories() {
+		rf := rf
+		t.Run(rf.name, func(t *testing.T) {
+			handler, createGrant := rf.setup(t)
+			ctx := context.Background()
+			instID := uuid.New()
+			adminID := uuid.New()
+
+			tok1 := createGrant(ctx, instID, adminID, nil)
+			tok2 := createGrant(ctx, instID, adminID, nil)
+
+			// 1. Missing, empty, invalid, or nil agentId must return 400 INVALID_INPUT (even if a TenantData context is present)
+			sharedContextUserID := uuid.New()
+			tenantCtx := pkgctx.WithTenant(context.Background(), &pkgctx.TenantData{
+				InstitutionID: instID,
+				UserID:        sharedContextUserID,
+				Role:          "SUPPORT_AGENT",
+			})
+
+			invalidPayloads := []map[string]string{
+				{"token": tok1},
+				{"token": tok1, "agentId": ""},
+				{"token": tok1, "agentId": "not-a-uuid"},
+				{"token": tok1, "agentId": uuid.Nil.String()},
+			}
+			for i, payload := range invalidPayloads {
+				raw, _ := json.Marshal(payload)
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(raw)).WithContext(tenantCtx)
+				req.RemoteAddr = fmt.Sprintf("198.51.100.%d:12345", 40+i)
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("case %d: expected 400 Bad Request for invalid/missing agentId, got %d: %s", i, rec.Code, rec.Body.String())
+				}
+				var prob struct {
+					Title string `json:"title"`
+					Type  string `json:"type"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &prob); err != nil {
+					t.Fatalf("case %d: failed to decode problem details: %v", i, err)
+				}
+				if prob.Title != "INVALID_INPUT" || prob.Type != "urn:grantsupport:error:invalid_input" {
+					t.Fatalf("case %d: expected INVALID_INPUT problem details, got title=%q type=%q", i, prob.Title, prob.Type)
+				}
+			}
+
+			// 2. Two agents log in with their own required agentIds (tok1 was not consumed by the rejected 400 requests above):
+			agent1ID := uuid.New()
+			agent2ID := uuid.New()
+
+			body1, _ := json.Marshal(map[string]string{"token": tok1, "agentId": agent1ID.String()})
+			req1 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(body1))
+			req1.RemoteAddr = "198.51.100.31:12345"
+			req1.Header.Set("Content-Type", "application/json")
+			rec1 := httptest.NewRecorder()
+			handler.ServeHTTP(rec1, req1)
+
+			body2, _ := json.Marshal(map[string]string{"token": tok2, "agentId": agent2ID.String()})
+			req2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(body2))
+			req2.RemoteAddr = "198.51.100.32:12345"
+			req2.Header.Set("Content-Type", "application/json")
+			rec2 := httptest.NewRecorder()
+			handler.ServeHTTP(rec2, req2)
+
+			if rec1.Code != http.StatusOK || rec2.Code != http.StatusOK {
+				t.Fatalf("login with explicit agentId failed: agent1=%d (%s), agent2=%d (%s)",
+					rec1.Code, strings.TrimSpace(rec1.Body.String()),
+					rec2.Code, strings.TrimSpace(rec2.Body.String()))
+			}
+
+			var resp1, resp2 struct {
+				AccessToken string `json:"access_token"`
+			}
+			_ = json.Unmarshal(rec1.Body.Bytes(), &resp1)
+			_ = json.Unmarshal(rec2.Body.Bytes(), &resp2)
+
+			// Agent 1 logs out:
+			reqLogout1 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/logout", nil)
+			reqLogout1.RemoteAddr = "198.51.100.31:12345"
+			reqLogout1.Header.Set("Authorization", "Bearer "+resp1.AccessToken)
+			recLogout1 := httptest.NewRecorder()
+			handler.ServeHTTP(recLogout1, reqLogout1)
+			if recLogout1.Code != http.StatusOK {
+				t.Fatalf("Agent 1 logout failed: %d %s", recLogout1.Code, recLogout1.Body.String())
+			}
+
+			// Agent 1's token is now revoked (401):
+			reqAgent1Again := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/logout", nil)
+			reqAgent1Again.RemoteAddr = "198.51.100.31:12345"
+			reqAgent1Again.Header.Set("Authorization", "Bearer "+resp1.AccessToken)
+			recAgent1Again := httptest.NewRecorder()
+			handler.ServeHTTP(recAgent1Again, reqAgent1Again)
+			if recAgent1Again.Code != http.StatusUnauthorized {
+				t.Fatalf("expected Agent 1 token to be 401 after logout, got %d", recAgent1Again.Code)
+			}
+
+			// Agent 2's session remains valid (200 OK):
+			reqAgent2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/logout", nil)
+			reqAgent2.RemoteAddr = "198.51.100.32:12345"
+			reqAgent2.Header.Set("Authorization", "Bearer "+resp2.AccessToken)
+			recAgent2 := httptest.NewRecorder()
+			handler.ServeHTTP(recAgent2, reqAgent2)
+			if recAgent2.Code != http.StatusOK {
+				t.Fatalf("expected Agent 2 session to remain valid after Agent 1 logout, got %d: %s", recAgent2.Code, strings.TrimSpace(recAgent2.Body.String()))
 			}
 		})
 	}
