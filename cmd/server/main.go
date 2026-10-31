@@ -123,7 +123,7 @@ func main() {
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	auditRepo.SetLockStore(lockStore)
 
-	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
+	grantService := service.NewGrantSupportService(supportGrantRepo, auditRepo)
 	grantService.SetRevocationStore(revocationStore)
 
 	var webhookDispatcher *webhook.WebhookDispatcher

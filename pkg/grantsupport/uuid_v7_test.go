@@ -116,7 +116,9 @@ func TestUUIDv7_EntityGenerationLifecycle(t *testing.T) {
 			lockStore := lock.NewSQLLockStore(db, dialect)
 			revStore := revocation.NewSQLRevocationStore(db, dialect)
 
-			svc := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+			auditRepo.SetLockStore(lockStore)
+
+			svc := service.NewGrantSupportService(grantRepo, auditRepo)
 			svc.SetRevocationStore(revStore)
 
 			instID := domain.NewUUID()

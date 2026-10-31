@@ -27,7 +27,6 @@ var (
 type GrantSupportService struct {
 	supportGrantRepo  *repository.SupportGrantRepository
 	auditRepo         *repository.SecurityAuditRepository
-	lockStore         ports.LockStore
 	revocationStore   ports.RevocationStore
 	webhookDispatcher *webhook.WebhookDispatcher
 }
@@ -35,12 +34,10 @@ type GrantSupportService struct {
 func NewGrantSupportService(
 	supportGrantRepo *repository.SupportGrantRepository,
 	auditRepo *repository.SecurityAuditRepository,
-	lockStore ports.LockStore,
 ) *GrantSupportService {
 	return &GrantSupportService{
 		supportGrantRepo: supportGrantRepo,
 		auditRepo:        auditRepo,
-		lockStore:        lockStore,
 	}
 }
 
@@ -109,19 +106,8 @@ func (s *GrantSupportService) CreateSupportGrantScoped(ctx context.Context, inst
 		WhitelistedIPs: whitelistedIPs,
 	}
 
-	if s.lockStore != nil {
-		lockKey := fmt.Sprintf("lock:grant:%s", institutionID.String())
-		err := s.lockStore.WithLock(ctx, lockKey, 10*time.Second, func(txCtx context.Context) error {
-			_, err := s.supportGrantRepo.CreateSupportGrant(txCtx, input)
-			return err
-		})
-		if err != nil {
-			return "", fmt.Errorf("failed to create support grant under lock: %w", err)
-		}
-	} else {
-		if _, err := s.supportGrantRepo.CreateSupportGrant(ctx, input); err != nil {
-			return "", err
-		}
+	if _, err := s.supportGrantRepo.CreateSupportGrant(ctx, input); err != nil {
+		return "", err
 	}
 
 	s.logSecurityEvent(ctx, institutionID, adminUserID, "SUPPORT_ACCESS_GRANTED", fmt.Sprintf("Support access grant created for %d minutes with scope %s", durationMinutes, scope))

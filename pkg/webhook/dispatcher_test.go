@@ -185,7 +185,9 @@ func TestGrantOperationIsolationFromWebhookFailure(t *testing.T) {
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	lockStore := lock.NewMemoryLockStore()
 
-	svc := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
+	auditRepo.SetLockStore(lockStore)
+
+	svc := service.NewGrantSupportService(supportGrantRepo, auditRepo)
 
 	// Configure a failing webhook endpoint (HTTP 500)
 	failingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

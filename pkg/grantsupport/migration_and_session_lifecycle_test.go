@@ -455,7 +455,9 @@ func TestCrossDialectLiveDatabaseUpgrade(t *testing.T) {
 			lockStore := lock.NewSQLLockStore(db, d.name)
 			revocationStore := revocation.NewSQLRevocationStore(db, d.name)
 
-			svc := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+			auditRepo.SetLockStore(lockStore)
+
+			svc := service.NewGrantSupportService(grantRepo, auditRepo)
 			svc.SetRevocationStore(revocationStore)
 
 			instID := uuid.New()

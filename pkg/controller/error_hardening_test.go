@@ -332,7 +332,7 @@ func TestErrorContract_RBACForbidden(t *testing.T) {
 // TestErrorContract_SupportLoginInformationDisclosure verifies uniform 401 for invalid, malformed, or missing tokens.
 func TestErrorContract_SupportLoginInformationDisclosure(t *testing.T) {
 	// Create minimal service with nil repo to trigger invalid token format
-	svc := service.NewGrantSupportService(nil, nil, nil)
+	svc := service.NewGrantSupportService(nil, nil)
 	ctrl := controller.NewSupportGrantController(svc)
 	handler := controller.CatchAsync(ctrl.SupportLogin)
 

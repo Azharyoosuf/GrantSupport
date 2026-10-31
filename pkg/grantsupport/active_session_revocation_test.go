@@ -427,7 +427,9 @@ func TestRevocation_SQLFallbackBackend(t *testing.T) {
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	lockStore := lock.NewMemoryLockStore()
 
-	svc := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+	auditRepo.SetLockStore(lockStore)
+
+	svc := service.NewGrantSupportService(grantRepo, auditRepo)
 	svc.SetRevocationStore(sqlRevStore)
 
 	instID := uuid.New()

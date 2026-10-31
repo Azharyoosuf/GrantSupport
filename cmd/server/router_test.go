@@ -97,7 +97,7 @@ func fullRouterFactories() []routerFactory {
 				auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 				auditRepo.SetLockStore(lockStore)
 
-				grantSvc := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+				grantSvc := service.NewGrantSupportService(grantRepo, auditRepo)
 				grantSvc.SetRevocationStore(revStore)
 
 				grantCtrl := controller.NewSupportGrantController(grantSvc)

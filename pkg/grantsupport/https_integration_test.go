@@ -72,7 +72,9 @@ func TestHTTPS_EndToEndWorkflow(t *testing.T) {
 	lockStore := lock.NewSQLLockStore(db, "sqlite")
 	revStore := revocation.NewSQLRevocationStore(db, "sqlite")
 
-	svc := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+	auditRepo.SetLockStore(lockStore)
+
+	svc := service.NewGrantSupportService(grantRepo, auditRepo)
 	svc.SetRevocationStore(revStore)
 	ctrl := controller.NewSupportGrantController(svc)
 

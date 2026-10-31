@@ -165,7 +165,7 @@ func NewEngine(opts ...Option) (*Engine, error) {
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	auditRepo.SetLockStore(lockStore)
 
-	grantService := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+	grantService := service.NewGrantSupportService(grantRepo, auditRepo)
 	grantService.SetRevocationStore(revocationStore)
 	if webhookDispatcher != nil {
 		grantService.SetWebhookDispatcher(webhookDispatcher)
