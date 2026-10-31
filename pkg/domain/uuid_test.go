@@ -6,12 +6,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"grantsupport/pkg/domain"
 )
 
 // TestUUIDv7_FormatAndVersion verifies that generated IDs are valid RFC 9562 UUIDv7 with correct version and variant bits.
 func TestUUIDv7_FormatAndVersion(t *testing.T) {
-	id := domain.NewUUID()
+	id := uuid.Must(uuid.NewV7())
 
 	if id == uuid.Nil {
 		t.Fatal("Expected non-nil UUID")
@@ -49,7 +48,7 @@ func TestUUIDv7_TimeOrdering(t *testing.T) {
 	ids := make([]uuid.UUID, count)
 
 	for i := 0; i < count; i++ {
-		ids[i] = domain.NewUUID()
+		ids[i] = uuid.Must(uuid.NewV7())
 		time.Sleep(1 * time.Millisecond) // Small delay to observe time progression
 	}
 
@@ -77,7 +76,7 @@ func TestUUIDv7_UniquenessAndConcurrency(t *testing.T) {
 			defer wg.Done()
 			localIDs := make([]uuid.UUID, perWorker)
 			for i := 0; i < perWorker; i++ {
-				localIDs[i] = domain.NewUUID()
+				localIDs[i] = uuid.Must(uuid.NewV7())
 				if localIDs[i].Version() != 7 {
 					t.Errorf("Generated UUID has invalid version: %d", localIDs[i].Version())
 				}

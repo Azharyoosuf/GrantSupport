@@ -17,7 +17,6 @@ import (
 
 	"grantsupport/pkg/adapters/lock"
 	"grantsupport/pkg/adapters/revocation"
-	"grantsupport/pkg/domain"
 	"grantsupport/pkg/grantsupport"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
@@ -121,12 +120,12 @@ func TestUUIDv7_EntityGenerationLifecycle(t *testing.T) {
 			svc := service.NewGrantSupportService(grantRepo, auditRepo)
 			svc.SetRevocationStore(revStore)
 
-			instID := domain.NewUUID()
-			adminID := domain.NewUUID()
-			agentID := domain.NewUUID()
+			instID := uuid.Must(uuid.NewV7())
+			adminID := uuid.Must(uuid.NewV7())
+			agentID := uuid.Must(uuid.NewV7())
 
 			// 1. Create Support Grant & verify raw token format
-			rawToken, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+			rawToken, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 			if err != nil {
 				t.Fatalf("[%s] CreateSupportGrant failed: %v", target.name, err)
 			}
@@ -207,9 +206,9 @@ func TestUUIDv7_EngineEndToEnd(t *testing.T) {
 	}
 	defer engine.Close()
 
-	instID := domain.NewUUID()
-	adminID := domain.NewUUID()
-	agentID := domain.NewUUID()
+	instID := uuid.Must(uuid.NewV7())
+	adminID := uuid.Must(uuid.NewV7())
+	agentID := uuid.Must(uuid.NewV7())
 
 	rawToken, err := engine.CreateSupportGrant(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 	if err != nil {

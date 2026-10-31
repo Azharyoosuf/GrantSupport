@@ -35,8 +35,5 @@ func resolveCallerID(r *http.Request, agentID string) (uuid.UUID, error) {
 	if tenant, ok := pkgctx.GetTenant(r.Context()); ok && tenant != nil {
 		return tenant.UserID, nil
 	}
-	if userID, ok := pkgctx.GetUser(r.Context()); ok {
-		return userID, nil
-	}
 	return uuid.Nil, NewAppError(http.StatusBadRequest, "AGENT_ID_REQUIRED", "Explicit agentId UUID must be provided in request body")
 }

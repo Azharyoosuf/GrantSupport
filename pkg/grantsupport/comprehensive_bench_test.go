@@ -230,7 +230,7 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 
 			// Warm-up 10 iterations
 			for i := 0; i < 10; i++ {
-				tok, _ := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+				tok, _ := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 				if tok != "" {
 					_, _, _ = svc.SupportLogin(ctx, tok, agentID)
 				}
@@ -244,7 +244,7 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 
 			for i := 0; i < numOps; i++ {
 				t0 := time.Now()
-				tok, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+				tok, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 				d := time.Since(t0)
 				if err != nil {
 					t.Fatalf("CreateSupportGrant failed: %v", err)

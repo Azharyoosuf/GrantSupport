@@ -22,7 +22,6 @@ import (
 
 var (
 	ErrSupportGrantInvalid = errors.New("SUPPORT_GRANT_INVALID: Invalid or expired support grant token")
-	ErrSupportGrantExpired = errors.New("SUPPORT_GRANT_EXPIRED: Support grant token has expired")
 )
 
 type GrantSupportService struct {
@@ -65,11 +64,6 @@ func (s *GrantSupportService) logSecurityEvent(ctx context.Context, institutionI
 			slog.String("event_type", eventType),
 		)
 	}
-}
-
-// CreateSupportGrant creates a temporary support access token with default FULL_ACCESS scope.
-func (s *GrantSupportService) CreateSupportGrant(ctx context.Context, institutionID, adminUserID uuid.UUID, durationMinutes int) (string, error) {
-	return s.CreateSupportGrantScoped(ctx, institutionID, adminUserID, durationMinutes, "FULL_ACCESS", nil)
 }
 
 // CreateSupportGrantScoped creates a temporary support access token with granular scope and IP restrictions.

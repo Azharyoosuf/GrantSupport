@@ -24,14 +24,14 @@ func TestGrantSupportServiceValidation(t *testing.T) {
 	svc := service.NewGrantSupportService(nil, nil)
 
 	t.Run("CreateSupportGrant fails with nil repository", func(t *testing.T) {
-		_, err := svc.CreateSupportGrant(context.Background(), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), 60)
+		_, err := svc.CreateSupportGrantScoped(context.Background(), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), 60, "FULL_ACCESS", nil)
 		if err == nil {
 			t.Errorf("Expected error when supportGrantRepo is nil")
 		}
 	})
 
 	t.Run("CreateSupportGrant fails with invalid duration (0 minutes)", func(t *testing.T) {
-		_, err := svc.CreateSupportGrant(context.Background(), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), 0)
+		_, err := svc.CreateSupportGrantScoped(context.Background(), uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), 0, "FULL_ACCESS", nil)
 		if err == nil {
 			t.Errorf("Expected error for 0 minutes duration")
 		}
@@ -84,7 +84,7 @@ func TestGrantSupportServiceLifecycle(t *testing.T) {
 	agentID := uuid.New()
 
 	// Tier 1: Admin Creates Support Grant
-	rawToken, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+	rawToken, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 	if err != nil {
 		t.Fatalf("CreateSupportGrant failed: %v", err)
 	}
@@ -120,7 +120,7 @@ func TestGrantSupportServiceLifecycle(t *testing.T) {
 	}
 
 	// Test Revocation
-	rawToken2, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+	rawToken2, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 	if err != nil {
 		t.Fatalf("CreateSupportGrant 2 failed: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestConcurrentSupportLoginRace(t *testing.T) {
 	instID := uuid.New()
 	adminID := uuid.New()
 
-	rawToken, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+	rawToken, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 	if err != nil {
 		t.Fatalf("CreateSupportGrant failed: %v", err)
 	}
@@ -228,7 +228,7 @@ func TestConcurrentSupportLoginRace_100Workers(t *testing.T) {
 	instID := uuid.New()
 	adminID := uuid.New()
 
-	rawToken, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+	rawToken, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 	if err != nil {
 		t.Fatalf("CreateSupportGrant failed: %v", err)
 	}

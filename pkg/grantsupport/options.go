@@ -116,8 +116,3 @@ func WithRedis(client *redis.Client) Option {
 		c.RedisClient = client
 	}
 }
-
-// WithRedisClient configures an optional Valkey/Redis client (alias for WithRedis).
-func WithRedisClient(client *redis.Client) Option {
-	return WithRedis(client)
-}

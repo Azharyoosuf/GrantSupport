@@ -465,7 +465,7 @@ func TestCrossDialectLiveDatabaseUpgrade(t *testing.T) {
 			agentID := uuid.New()
 
 			// 1. Create grant
-			token, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+			token, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 			if err != nil {
 				t.Fatalf("[%s] CreateSupportGrant failed: %v", d.name, err)
 			}
