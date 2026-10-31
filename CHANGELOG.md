@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking changes
+- **HTTP API & Response Payloads**:
+  - **Support Login Response Fields (`POST /api/v1/auth/support/login`)**: Removed undocumented duplicate camelCase field `accessToken` and nested `data: { institution_id, access_token }`. The response payload now strictly adheres to `{ "success": true, "message": "...", "institution_id": "...", "access_token": "..." }`.
+  - **Support Login Required `agentId` (`POST /api/v1/auth/support/login`)**: `agentId` in the request body is now strictly required (`validate:"required,uuid4_or_uuid7"`). Requests omitting or passing an invalid/empty UUID now return HTTP `400 Bad Request` with Problem Details `code: INVALID_INPUT` (previously defaulted from JWT context claims).
+  - **Removed JIT Access-Request Endpoints**: Removed all six `/api/v1/access-requests*` routes (`POST /api/v1/access-requests`, `GET /api/v1/access-requests`, `GET /api/v1/access-requests/{id}`, `POST /api/v1/access-requests/{id}/approve`, `POST /api/v1/access-requests/{id}/reject`, and `POST /api/v1/access-requests/{id}/cancel`).
+  - **Extracted BulletproofAuth Middleware**: Removed Ed25519 request-signing authentication and table `gs_replays` (extracted into standalone repository [`bulletproofauth`](https://github.com/azharyoosuf/bulletproofauth)).
+- **Network & Reverse Proxy Behavior**:
+  - **`TRUSTED_PROXIES` Enforcement After `RealIP` Removal**: Removed `chimiddleware.RealIP` to eliminate unconditional IP header spoofing. Forwarded headers (`CF-Connecting-IP`, `X-Real-IP`, `X-Forwarded-For`) are now evaluated **only** when the immediate socket peer (`r.RemoteAddr`) matches an IP or CIDR in `TRUSTED_PROXIES` (default: `127.0.0.1,::1`). Reverse proxy deployments (nginx, Traefik, Cloudflare, AWS ALB) and Docker bridge networks must configure `TRUSTED_PROXIES` (or `grantsupport.WithTrustedProxies`); otherwise all incoming traffic appears to originate from the proxy peer IP for rate limiting and `whitelisted_ips`. See documentation: [README.md (Path C: Reverse Proxies & `TRUSTED_PROXIES`)](README.md#path-c-reverse-proxies--trusted_proxies-required-behind-nginx-traefik-cloudflare-or-docker) and [docs/INTEGRATION_GUIDE.md (Section 4: Reverse Proxies, Docker Networks & `TRUSTED_PROXIES`)](docs/INTEGRATION_GUIDE.md#4-reverse-proxies-docker-networks--trusted_proxies).
+- **Configuration & Environment Variables**:
+  - **Removed `ENFORCE_STRICT_IP_BINDING`**: Removed `Config.EnforceStrictIPBinding` and environment variable `ENFORCE_STRICT_IP_BINDING` (moved to `bulletproofauth`).
+  - **Removed `MASTER_ENCRYPTION_KEY` & `LOCAL_SECRET_KEY`**: Removed from `docker-compose.yml` along with the removal of `pkg/security/experimental`.
+  - **`VALKEY_CACHE_URL` Default Value**: `Config.ValkeyCacheURL` now defaults to `""` instead of `"redis://127.0.0.1:6379"`. Omission now runs cleanly in SQL-only mode without dialing localhost.
+- **Removed Packages**:
+  - `pkg/adapters/replay` (`MemoryReplayStore`, `RedisReplayStore`, `SQLReplayStore`) — moved to `bulletproofauth`.
+  - `pkg/ports/replay` (`ReplayStore`, `ReplayMetadata`, `ErrReplayDetected`) — moved to `bulletproofauth`.
+  - `pkg/security/experimental` (`LocalEncryptionService`, `KMSEncryptionService`, `CalculateMerkleRoot`, `GenerateMerkleProof`, `VerifyMerkleProof`).
+  - `pkg/apierrors` (`ProblemDetails`, `InvalidParam`, `WriteProblem`, `BadRequest`, `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `InternalError`).
+  - `pkg/resilience` (`CircuitBreaker`, `NewCircuitBreaker`, `State`, `ErrCircuitOpen`).
+  - JIT access-request packages: `pkg/controller/access_request_*`, `pkg/domain/access_request.go`, `pkg/repository/access_request_repository.go`, `pkg/service/access_request_service.go`, and schema/entity `ent/schema/accessrequest.go` & `ent.AccessRequest*`.
+- **Removed & Modified Exported Go Symbols**:
+  - **`pkg/grantsupport`**:
+    - Removed `(*Engine).BulletproofMiddleware(next http.Handler) http.Handler`
+    - Removed `WithReplayStore(store ports.ReplayStore) Option`
+    - Removed `EngineConfig.ReplayStore`
+    - Replaced `WithRedisClient(client *redis.Client) Option` with `WithRedis(client *redis.Client) Option`
+  - **`pkg/service`**:
+    - Changed signature `NewGrantSupportService(grantRepo, auditRepo)` (removed 3rd parameter `lockStore ports.LockStore`)
+    - Removed `(*GrantSupportService).SetLockStore(lockStore ports.LockStore)`
+    - Removed `(*GrantSupportService).CreateSupportGrant(ctx, instID, adminID, duration)` (use `CreateSupportGrantScoped`)
+  - **`pkg/middleware`**:
+    - Removed `BulletproofAuthMiddleware(replayStore, keyStore)`, `BulletproofSecurityContext`, `GetBulletproofSecurityContext(ctx)`, `GetRealClientIP(r)`
+    - Removed `ValidateIPWhitelist` and `ExtractClientIP` from `pkg/middleware` (use `pkg/security.ValidateIPWhitelist` and `pkg/security.ExtractClientIP`)
+  - **`pkg/security`**:
+    - Removed `APIKeyDetails`, `ValidatePayloadTTL`, `ParseEd25519PublicKeyBase64`, `VerifyEd25519Signature`, `GenerateEd25519KeyPair` (moved to `bulletproofauth`)
+  - **`pkg/ports`**:
+    - Removed `ReplayStore` interface, `ErrReplayDetected`
+    - Removed unused sentinel `ErrTokenRevoked`
+  - **`pkg/cache`**:
+    - Removed `DistributedLock`, `NewDistributedLock`, `(*DistributedLock).AcquireLock`, `(*DistributedLock).ReleaseLock`, `(*DistributedLock).WithLock`, `ErrLockAcquisitionFailed` (use `pkg/adapters/lock.RedisLockStore`)
+    - Removed `NewValkeyClusterClient` and `(*ValkeyClient).SetNX`
+  - **`pkg/context`**:
+    - Removed `WithUser`, `WithRole`, `GetRole`
+  - **`pkg/controller`**:
+    - Removed `(*BaseController).WriteRFC7807Error` and `(*BaseController).WriteRFC9457Error` (use `WriteProblemDetailsError`)
+  - **`pkg/domain`**:
+    - Removed `NewUUID` and `NewUUIDString`
+
 ### Security
 - **Untrusted Client IP Spoofing via `chimiddleware.RealIP` (present in `v0.1.0-beta.3`)**: Removed `chimiddleware.RealIP` from both the standalone server router (`cmd/server/main.go`) and the embedded engine router (`pkg/grantsupport/engine.go`). Previously, `chimiddleware.RealIP` unconditionally overwrote `r.RemoteAddr` from `True-Client-IP`, `X-Real-IP`, or `X-Forwarded-For` before `security.ExtractClientIP` could verify the peer against `TRUSTED_PROXIES`, allowing direct untrusted peers to spoof client IPs to bypass per-grant `whitelisted_ips` checks at login and per-IP rate limiting. **Upgrade Note (Reverse Proxies & Docker Networks)**: Because `chimiddleware.RealIP` is no longer present, deployments running behind nginx, Traefik, Cloudflare, AWS ALB, or a Docker bridge network **must** configure `TRUSTED_PROXIES` (or `grantsupport.WithTrustedProxies` in embedded mode) to include the proxy's IP address or subnet CIDR (default is loopback only: `127.0.0.1,::1`). Without `TRUSTED_PROXIES` configured for your proxy subnet, all proxied requests will appear to originate from the proxy's IP for rate limiting and `whitelisted_ips` evaluation.
 
