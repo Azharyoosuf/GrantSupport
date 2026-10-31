@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,6 +15,9 @@ import (
 	"grantsupport/pkg/ports"
 	"grantsupport/pkg/security"
 )
+
+// ErrAuditChainIntegrityViolation indicates that an audit event's stored hash chain does not match its expected cryptographic SHA-256 link.
+var ErrAuditChainIntegrityViolation = errors.New("audit chain integrity violation")
 
 type SecurityAuditRepository struct {
 	*BaseRepository
@@ -180,7 +184,7 @@ func (r *SecurityAuditRepository) VerifyAuditChain(ctx context.Context, institut
 		expectedHash := hex.EncodeToString(h.Sum(nil))
 
 		if event.HashChain != expectedHash {
-			return false, fmt.Errorf("audit chain integrity violation at event %s: expected %s, got %s", event.ID, expectedHash, event.HashChain)
+			return false, fmt.Errorf("%w at event %s: expected %s, got %s", ErrAuditChainIntegrityViolation, event.ID, expectedHash, event.HashChain)
 		}
 		prevHash = event.HashChain
 	}

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/redis/go-redis/v9"
 	"grantsupport/pkg/controller"
 	_ "modernc.org/sqlite"
 )
@@ -90,5 +92,32 @@ func TestHealthController_ReadinessFailsWhenDBDown(t *testing.T) {
 
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected HTTP 503 when DB is down, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "sql:") || strings.Contains(rec.Body.String(), "database is closed") {
+		t.Fatalf("readiness response leaked internal SQL error string: %s", rec.Body.String())
+	}
+
+	// Also verify Valkey failure does not leak internal driver connection error details
+	liveDB, err := sql.Open("sqlite", "file::memory:?cache=shared")
+	if err != nil {
+		t.Fatalf("failed to open sqlite: %v", err)
+	}
+	defer liveDB.Close()
+
+	deadRedis := redis.NewClient(&redis.Options{Addr: "127.0.0.1:1"})
+	_ = deadRedis.Close()
+
+	healthCtrlValkey := controller.NewHealthController("v0.1.0-beta.2", liveDB, deadRedis)
+	handlerValkey := controller.CatchAsync(healthCtrlValkey.Ready)
+
+	reqValkey := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	recValkey := httptest.NewRecorder()
+	handlerValkey.ServeHTTP(recValkey, reqValkey)
+
+	if recValkey.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected HTTP 503 when Valkey is down, got %d: %s", recValkey.Code, recValkey.Body.String())
+	}
+	if strings.Contains(recValkey.Body.String(), "127.0.0.1:1") || strings.Contains(recValkey.Body.String(), "redis: client is closed") {
+		t.Fatalf("readiness response leaked internal Valkey error string: %s", recValkey.Body.String())
 	}
 }

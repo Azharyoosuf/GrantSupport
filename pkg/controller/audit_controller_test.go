@@ -162,3 +162,93 @@ func TestAuditController_VerifyAuditChain(t *testing.T) {
 		t.Fatalf("expected valid hash chain, got invalid")
 	}
 }
+
+func TestAuditController_VerifyAuditChain_BrokenChainAndQueryErrorDoNotLeak(t *testing.T) {
+	baseRepo, db := setupTestAuditDB(t)
+	defer db.Close()
+	defer baseRepo.MasterClient.Close()
+
+	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
+	auditService := service.NewSecurityAuditService(auditRepo)
+	auditCtrl := controller.NewAuditController(auditService)
+
+	instID := uuid.New()
+	adminID := uuid.New()
+
+	ctx := context.Background()
+	_, err := auditRepo.LogSecurityEvent(ctx, instID, adminID, "EVENT_1", "Original description 1", nil)
+	if err != nil {
+		t.Fatalf("LogSecurityEvent 1 failed: %v", err)
+	}
+	ev2, err := auditRepo.LogSecurityEvent(ctx, instID, adminID, "EVENT_2", "Original description 2", nil)
+	if err != nil {
+		t.Fatalf("LogSecurityEvent 2 failed: %v", err)
+	}
+
+	// Tamper with the second event in the database so the hash chain is broken
+	if _, err := db.ExecContext(ctx, `UPDATE gs_audit_events SET description = 'Tampered description' WHERE id = ?`, ev2.ID); err != nil {
+		t.Fatalf("failed to tamper with audit row: %v", err)
+	}
+
+	handler := controller.CatchAsync(auditCtrl.VerifyAuditChain)
+
+	// 1. Broken chain must return HTTP 200 with {"valid": false} and must not leak internal expected/got hashes
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/audit/verify", nil)
+	req = req.WithContext(pkgctx.WithTenant(req.Context(), &pkgctx.TenantData{
+		InstitutionID: instID,
+		UserID:        adminID,
+		Role:          "ADMIN",
+	}))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 when audit chain is broken, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var verifyResp struct {
+		Success bool   `json:"success"`
+		Valid   bool   `json:"valid"`
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &verifyResp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if verifyResp.Valid {
+		t.Fatalf("expected valid=false when audit chain is broken, got valid=true (body: %s)", rec.Body.String())
+	}
+	if bytesContainsAny(rec.Body.String(), "expected ", "got ", ev2.ID.String()) {
+		t.Fatalf("response leaked internal hash violation details: %s", rec.Body.String())
+	}
+
+	// 2. Real database query failure must return HTTP 500 with a generic message (no raw SQL driver error)
+	_ = db.Close()
+	reqErr := httptest.NewRequest(http.MethodPost, "/api/v1/audit/verify", nil)
+	reqErr = reqErr.WithContext(pkgctx.WithTenant(reqErr.Context(), &pkgctx.TenantData{
+		InstitutionID: instID,
+		UserID:        adminID,
+		Role:          "ADMIN",
+	}))
+	recErr := httptest.NewRecorder()
+	handler.ServeHTTP(recErr, reqErr)
+
+	if recErr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected HTTP 500 on real DB query failure, got %d: %s", recErr.Code, recErr.Body.String())
+	}
+	if bytesContainsAny(recErr.Body.String(), "sql:", "database is closed") {
+		t.Fatalf("HTTP 500 response leaked raw SQL driver error: %s", recErr.Body.String())
+	}
+}
+
+func bytesContainsAny(haystack string, needles ...string) bool {
+	for _, n := range needles {
+		if len(n) > 0 && len(haystack) >= len(n) {
+			for i := 0; i <= len(haystack)-len(n); i++ {
+				if haystack[i:i+len(n)] == n {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
