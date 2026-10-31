@@ -8,14 +8,21 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
+	"sort"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
 	"grantsupport/pkg/adapters/lock"
 	"grantsupport/pkg/adapters/ratelimit"
 	"grantsupport/pkg/adapters/revocation"
+	"grantsupport/pkg/cache"
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
 	"grantsupport/pkg/grantsupport"
@@ -329,4 +336,290 @@ func TestClientIPSpoofingAndTrustedProxies_FullRouters(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestEmbeddedEngineParityWithServer(t *testing.T) {
+	if err := security.SetupTestRSAKeys(); err != nil {
+		t.Fatalf("SetupTestRSAKeys failed: %v", err)
+	}
+
+	t.Run("with_redis_wires_redis_stores_and_explicit_options_win", func(t *testing.T) {
+		valkeyURL := os.Getenv("VALKEY_CACHE_URL")
+		if valkeyURL == "" {
+			valkeyURL = "valkey://127.0.0.1:6379/0"
+		}
+		vc, err := cache.NewValkeyClient(valkeyURL)
+		if err != nil {
+			t.Fatalf("Failed to connect to live Valkey (%s): %v", valkeyURL, err)
+		}
+		t.Cleanup(func() { _ = vc.Close() })
+		rdb := vc.Client
+
+		ctx := context.Background()
+		dsn := fmt.Sprintf("file:engine_redis_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			t.Fatalf("sql.Open failed: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+
+		eng, err := grantsupport.NewEngine(
+			grantsupport.WithDB(db, "sqlite"),
+			grantsupport.WithRedis(rdb),
+			grantsupport.WithAutoMigrate(true),
+		)
+		if err != nil {
+			t.Fatalf("NewEngine failed: %v", err)
+		}
+		t.Cleanup(func() { _ = eng.Close() })
+
+		instID := uuid.New()
+		adminID := uuid.New()
+		agentID := uuid.New()
+
+		// 1. Prove RedisLockStore is used by Engine:
+		// Pre-hold "lock:audit:<instID>" in Valkey and call CreateSupportGrant with a 60ms context timeout.
+		// Because RedisLockStore sees the lock in Valkey, LogSecurityEvent times out and writes 0 audit events.
+		auditLockKey := fmt.Sprintf("lock:audit:%s", instID.String())
+		if err := rdb.Set(ctx, auditLockKey, "external-holder", 5*time.Second).Err(); err != nil {
+			t.Fatalf("failed to seed audit lock in Valkey: %v", err)
+		}
+		shortCtx, cancel := context.WithTimeout(ctx, 60*time.Millisecond)
+		_, _ = eng.CreateSupportGrant(shortCtx, instID, adminID, 30, "FULL_ACCESS", nil)
+		cancel()
+		_ = rdb.Del(ctx, auditLockKey).Val()
+
+		eventsWhileLocked, err := eng.GetAuditEvents(ctx, instID, 10, 0)
+		if err != nil {
+			t.Fatalf("GetAuditEvents failed: %v", err)
+		}
+		if len(eventsWhileLocked) != 0 {
+			t.Fatalf("expected 0 audit events while Valkey key %s was held (proving RedisLockStore is wired), got %d", auditLockKey, len(eventsWhileLocked))
+		}
+
+		// Now that the Valkey lock is released, CreateSupportGrant succeeds and writes the audit event:
+		rawToken, err := eng.CreateSupportGrant(ctx, instID, adminID, 30, "FULL_ACCESS", nil)
+		if err != nil {
+			t.Fatalf("CreateSupportGrant failed: %v", err)
+		}
+		eventsAfterUnlock, err := eng.GetAuditEvents(ctx, instID, 10, 0)
+		if err != nil || len(eventsAfterUnlock) != 1 {
+			t.Fatalf("expected 1 audit event after Valkey lock was released, got %d (err=%v)", len(eventsAfterUnlock), err)
+		}
+
+		// 2. Prove RedisRateLimiter is used by Engine.HTTPHandler():
+		handler := eng.HTTPHandler()
+		uniqueIP := fmt.Sprintf("198.51.100.%d", 100+(instID[0]%100))
+		rateKey := fmt.Sprintf("ratelimit:ip:%s:/api/v1/auth/support/login", uniqueIP)
+		_ = rdb.Del(ctx, rateKey).Val()
+		t.Cleanup(func() { _ = rdb.Del(ctx, rateKey).Val() })
+
+		loginBody, _ := json.Marshal(map[string]string{
+			"token":   rawToken,
+			"agentId": agentID.String(),
+		})
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginReq.RemoteAddr = uniqueIP + ":54321"
+		loginRec := httptest.NewRecorder()
+		handler.ServeHTTP(loginRec, loginReq)
+		if loginRec.Code != http.StatusOK {
+			t.Fatalf("login failed: %d %s", loginRec.Code, loginRec.Body.String())
+		}
+
+		rateVal, err := rdb.Get(ctx, rateKey).Result()
+		if err != nil || rateVal != "1" {
+			t.Fatalf("expected Valkey key %q to equal \"1\" (proving RedisRateLimiter is used), got val=%q err=%v", rateKey, rateVal, err)
+		}
+
+		// 3. Prove RedisRevocationStore is used by Engine:
+		revKey := fmt.Sprintf("cache:%s:user:security:%s", instID.String(), agentID.String())
+		_ = rdb.Del(ctx, revKey).Val()
+		t.Cleanup(func() { _ = rdb.Del(ctx, revKey).Val() })
+
+		if err := eng.RevokeSupportGrant(ctx, instID, adminID); err != nil {
+			t.Fatalf("RevokeSupportGrant failed: %v", err)
+		}
+		revVal, err := rdb.Get(ctx, revKey).Result()
+		if err != nil || revVal != "2" {
+			t.Fatalf("expected Valkey key %q to equal \"2\" (proving RedisRevocationStore is used), got val=%q err=%v", revKey, revVal, err)
+		}
+
+		// 4. Prove explicit store options win over WithRedis(rdb):
+		dsnExplicit := fmt.Sprintf("file:engine_explicit_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+		dbExplicit, err := sql.Open("sqlite", dsnExplicit)
+		if err != nil {
+			t.Fatalf("sql.Open failed: %v", err)
+		}
+		t.Cleanup(func() { _ = dbExplicit.Close() })
+
+		memLock := lock.NewMemoryLockStore()
+		sqlRev := revocation.NewSQLRevocationStore(dbExplicit, "sqlite")
+		memRate := ratelimit.NewMemoryRateLimiter()
+
+		engExplicit, err := grantsupport.NewEngine(
+			grantsupport.WithDB(dbExplicit, "sqlite"),
+			grantsupport.WithRedis(rdb),
+			grantsupport.WithLockStore(memLock),
+			grantsupport.WithRevocationStore(sqlRev),
+			grantsupport.WithRateLimiter(memRate),
+			grantsupport.WithAutoMigrate(true),
+		)
+		if err != nil {
+			t.Fatalf("NewEngine with explicit stores failed: %v", err)
+		}
+		t.Cleanup(func() { _ = engExplicit.Close() })
+
+		instID2 := uuid.New()
+		adminID2 := uuid.New()
+		agentID2 := uuid.New()
+		tok2, err := engExplicit.CreateSupportGrant(ctx, instID2, adminID2, 30, "FULL_ACCESS", nil)
+		if err != nil {
+			t.Fatalf("CreateSupportGrant failed: %v", err)
+		}
+		_, _, err = engExplicit.SupportLogin(ctx, tok2, agentID2)
+		if err != nil {
+			t.Fatalf("SupportLogin failed: %v", err)
+		}
+		if err := engExplicit.RevokeSupportGrant(ctx, instID2, adminID2); err != nil {
+			t.Fatalf("RevokeSupportGrant failed: %v", err)
+		}
+		revKey2 := fmt.Sprintf("cache:%s:user:security:%s", instID2.String(), agentID2.String())
+		if exists := rdb.Exists(ctx, revKey2).Val(); exists != 0 {
+			t.Fatalf("expected explicit SQLRevocationStore to win over WithRedis, but Valkey key %s was written", revKey2)
+		}
+	})
+
+	t.Run("security_headers_match_between_engine_and_server", func(t *testing.T) {
+		prevCfg := config.AppConfig
+		t.Cleanup(func() { config.AppConfig = prevCfg })
+		config.AppConfig = &config.Config{
+			TrustedProxies:        []string{"10.0.0.1"},
+			HSTSEnabled:           true,
+			HSTSMaxAge:            31536000,
+			HSTSIncludeSubdomains: true,
+		}
+
+		factories := fullRouterFactories()
+		engHandler, _ := factories[0].setup(t)
+		srvHandler, _ := factories[1].setup(t)
+
+		reqEng := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+		reqEng.RemoteAddr = "10.0.0.1:443"
+		reqEng.Header.Set("X-Forwarded-Proto", "https")
+		recEng := httptest.NewRecorder()
+		engHandler.ServeHTTP(recEng, reqEng)
+
+		reqSrv := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+		reqSrv.RemoteAddr = "10.0.0.1:443"
+		reqSrv.Header.Set("X-Forwarded-Proto", "https")
+		recSrv := httptest.NewRecorder()
+		srvHandler.ServeHTTP(recSrv, reqSrv)
+
+		expectedHeaders := []string{
+			"X-Content-Type-Options",
+			"X-Frame-Options",
+			"Referrer-Policy",
+			"Strict-Transport-Security",
+		}
+		for _, hdr := range expectedHeaders {
+			engVal := recEng.Header().Get(hdr)
+			srvVal := recSrv.Header().Get(hdr)
+			if srvVal == "" {
+				t.Fatalf("server router missing expected security header %s", hdr)
+			}
+			if engVal != srvVal {
+				t.Fatalf("security header %s mismatch: Engine.HTTPHandler()=%q vs Server=%q", hdr, engVal, srvVal)
+			}
+		}
+	})
+
+	t.Run("webhook_dispatcher_starts_only_when_both_url_and_secret_are_set", func(t *testing.T) {
+		var hits atomic.Int32
+		hookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits.Add(1)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer hookSrv.Close()
+
+		ctx := context.Background()
+		dsn1 := fmt.Sprintf("file:eng_hook_nosecret_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+		db1, err := sql.Open("sqlite", dsn1)
+		if err != nil {
+			t.Fatalf("sql.Open failed: %v", err)
+		}
+		defer db1.Close()
+
+		// URL without secret -> webhookDispatcher field on Engine must remain nil
+		engNoSecret, err := grantsupport.NewEngine(
+			grantsupport.WithDB(db1, "sqlite"),
+			grantsupport.WithWebhook(hookSrv.URL, ""),
+			grantsupport.WithAutoMigrate(true),
+		)
+		if err != nil {
+			t.Fatalf("NewEngine failed: %v", err)
+		}
+		defer engNoSecret.Close()
+
+		val := reflect.ValueOf(engNoSecret).Elem().FieldByName("webhookDispatcher")
+		if !val.IsNil() {
+			t.Fatalf("expected Engine.webhookDispatcher to be nil when WebhookSecret is empty, but it was initialized")
+		}
+
+		// URL + secret -> webhookDispatcher is initialized and delivers event
+		dsn2 := fmt.Sprintf("file:eng_hook_withsecret_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+		db2, err := sql.Open("sqlite", dsn2)
+		if err != nil {
+			t.Fatalf("sql.Open failed: %v", err)
+		}
+		defer db2.Close()
+
+		engWithSecret, err := grantsupport.NewEngine(
+			grantsupport.WithDB(db2, "sqlite"),
+			grantsupport.WithWebhook(hookSrv.URL, "test-hmac-secret"),
+			grantsupport.WithAutoMigrate(true),
+		)
+		if err != nil {
+			t.Fatalf("NewEngine failed: %v", err)
+		}
+		_, err = engWithSecret.CreateSupportGrant(ctx, uuid.New(), uuid.New(), 30, "FULL_ACCESS", nil)
+		if err != nil {
+			t.Fatalf("CreateSupportGrant failed: %v", err)
+		}
+		_ = engWithSecret.Close()
+
+		if hits.Load() == 0 {
+			t.Fatalf("expected webhook to be delivered when both URL and secret are configured")
+		}
+	})
+
+	t.Run("route_table_parity_between_engine_and_server", func(t *testing.T) {
+		factories := fullRouterFactories()
+		engHandler, _ := factories[0].setup(t)
+		srvHandler, _ := factories[1].setup(t)
+
+		collectRoutes := func(h http.Handler) []string {
+			r, ok := h.(chi.Routes)
+			if !ok {
+				t.Fatalf("handler %T does not implement chi.Routes", h)
+			}
+			var routes []string
+			err := chi.Walk(r, func(method string, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+				routes = append(routes, fmt.Sprintf("%s %s", method, route))
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("chi.Walk failed: %v", err)
+			}
+			sort.Strings(routes)
+			return routes
+		}
+
+		engRoutes := collectRoutes(engHandler)
+		srvRoutes := collectRoutes(srvHandler)
+
+		if !reflect.DeepEqual(engRoutes, srvRoutes) {
+			t.Fatalf("route table mismatch between Engine.HTTPHandler() and Server router:\nEngine: %v\nServer: %v", engRoutes, srvRoutes)
+		}
+	})
 }

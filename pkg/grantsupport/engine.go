@@ -124,7 +124,9 @@ func NewEngine(opts ...Option) (*Engine, error) {
 
 	lockStore := cfg.LockStore
 	if lockStore == nil {
-		if targetSQLDB != nil {
+		if cfg.RedisClient != nil {
+			lockStore = lock.NewRedisLockStore(cfg.RedisClient)
+		} else if targetSQLDB != nil {
 			lockStore = lock.NewSQLLockStore(targetSQLDB, targetDialect)
 		} else {
 			lockStore = lock.NewMemoryLockStore()
@@ -133,7 +135,9 @@ func NewEngine(opts ...Option) (*Engine, error) {
 
 	revocationStore := cfg.RevocationStore
 	if revocationStore == nil {
-		if targetSQLDB != nil {
+		if cfg.RedisClient != nil {
+			revocationStore = revocation.NewRedisRevocationStore(cfg.RedisClient)
+		} else if targetSQLDB != nil {
 			revocationStore = revocation.NewSQLRevocationStore(targetSQLDB, targetDialect)
 		}
 	}
@@ -143,12 +147,16 @@ func NewEngine(opts ...Option) (*Engine, error) {
 
 	rateLimiter := cfg.RateLimiter
 	if rateLimiter == nil {
-		rateLimiter = ratelimit.NewMemoryRateLimiter()
+		if cfg.RedisClient != nil {
+			rateLimiter = ratelimit.NewRedisRateLimiter(cfg.RedisClient)
+		} else {
+			rateLimiter = ratelimit.NewMemoryRateLimiter()
+		}
 	}
 
-	// 5. Initialize Webhook Dispatcher
+	// 5. Initialize Webhook Dispatcher (only when both URL and secret are configured)
 	var webhookDispatcher *webhook.WebhookDispatcher
-	if cfg.WebhookURL != "" {
+	if cfg.WebhookURL != "" && cfg.WebhookSecret != "" {
 		webhookDispatcher = webhook.NewWebhookDispatcher(cfg.WebhookURL, cfg.WebhookSecret)
 	}
 
@@ -235,6 +243,7 @@ func (e *Engine) HTTPHandler() http.Handler {
 	r.Use(chimiddleware.Logger)
 	r.Use(chimiddleware.Recoverer)
 	r.Use(middleware.CorrelationIDMiddleware)
+	r.Use(middleware.SecurityHeadersMiddleware)
 
 	// Public Health & Readiness Probes
 	r.Get("/health", controller.CatchAsync(e.healthController.Live))

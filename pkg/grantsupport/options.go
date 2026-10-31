@@ -110,9 +110,14 @@ func WithEnvironment(env string) Option {
 	}
 }
 
-// WithRedisClient configures an optional Valkey/Redis client for readiness health checking.
-func WithRedisClient(client *redis.Client) Option {
+// WithRedis configures an optional Valkey/Redis client for distributed locking, session revocation, rate limiting, and readiness health checking.
+func WithRedis(client *redis.Client) Option {
 	return func(c *EngineConfig) {
 		c.RedisClient = client
 	}
+}
+
+// WithRedisClient configures an optional Valkey/Redis client (alias for WithRedis).
+func WithRedisClient(client *redis.Client) Option {
+	return WithRedis(client)
 }
