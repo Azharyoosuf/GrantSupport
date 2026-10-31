@@ -68,7 +68,7 @@ func (c *SupportGrantController) SupportLogin(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return NewAppError(http.StatusUnauthorized, "SUPPORT_LOGIN_FAILED", "Invalid or expired support grant token")
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support agent authenticated successfully.", "institution_id": instID, "access_token": jwtToken, "accessToken": jwtToken, "data": map[string]any{"institution_id": instID, "access_token": jwtToken}})
+	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support agent authenticated successfully.", "institution_id": instID, "access_token": jwtToken})
 	return nil
 }
 

@@ -30,6 +30,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
 
   /health/live:
     get:
@@ -44,6 +46,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
 
   /health/ready:
     get:
@@ -58,6 +62,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
         '503':
           description: Primary SQL database or mandatory dependency is unreachable
           content:
@@ -78,6 +84,8 @@ paths:
             text/plain; version=0.0.4; charset=utf-8:
               schema:
                 type: string
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
 
   /.well-known/jwks.json:
     get:
@@ -98,6 +106,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JWKSResponse'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
         '503':
           $ref: '#/components/responses/RFC7807InternalError'
 
@@ -253,6 +263,8 @@ paths:
           $ref: '#/components/responses/RFC7807BadRequest'
         '401':
           $ref: '#/components/responses/RFC7807Unauthorized'
+        '404':
+          $ref: '#/components/responses/RFC7807NotFound'
         '500':
           $ref: '#/components/responses/RFC7807InternalError'
 
@@ -313,15 +325,32 @@ paths:
       summary: Verify Cryptographic Audit Chain
       description: >
         Called by a customer administrator to cryptographically verify the unbroken SHA-256 sequential hash chain of all historical audit events for their tenant.
+        Returns HTTP 200 with `valid: true` when the hash chain is intact, or HTTP 200 with `valid: false` when a hash chain integrity violation is detected.
+        Returns HTTP 500 only when an underlying database query failure prevents verification.
       security:
         - BearerAuth: []
       responses:
         '200':
-          description: Audit ledger verification result
+          description: "Audit ledger verification result (`valid: true` when intact, `valid: false` when chain integrity is broken)"
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditVerifyResponse'
+              examples:
+                validChain:
+                  summary: Intact audit hash chain
+                  value:
+                    success: true
+                    valid: true
+                    institution_id: 550e8400-e29b-41d4-a716-446655440000
+                    message: Audit log cryptographic hash chain is valid and unbroken.
+                brokenChain:
+                  summary: Tampered or broken audit hash chain
+                  value:
+                    success: false
+                    valid: false
+                    institution_id: 550e8400-e29b-41d4-a716-446655440000
+                    message: Audit ledger hash chain integrity violation detected
         '401':
           $ref: '#/components/responses/RFC7807Unauthorized'
         '500':
@@ -347,7 +376,7 @@ components:
           example: GrantSupport Engine
         version:
           type: string
-          example: v0.1.0-beta.2
+          example: vX.Y.Z
       required:
         - status
         - service
@@ -370,7 +399,7 @@ components:
           example: sql-only
         version:
           type: string
-          example: v0.1.0-beta.2
+          example: vX.Y.Z
       required:
         - status
         - database
@@ -430,7 +459,7 @@ components:
           example: 60
         scope:
           type: string
-          maxLength: 100
+          maxLength: 64
           description: Host-application permission scope passed through to the JWT claims. GrantSupport does not enforce your domain rules; your application must interpret this claim.
           example: BILLING_READ_ONLY
         whitelistedIps:
@@ -464,7 +493,6 @@ components:
       type: object
       required:
         - token
-        - agentId
       properties:
         token:
           type: string
@@ -473,7 +501,7 @@ components:
         agentId:
           type: string
           format: uuid
-          description: Unique identifier of the authenticated vendor support engineer claiming the session.
+          description: Optional in the schema when caller context already carries an authenticated user UUID; required for unauthenticated support login requests.
           example: 7f4c935b-16d7-4f9e-a8f2-39c4a852b719
 
     SupportLoginResponse:
@@ -663,16 +691,17 @@ components:
         - title
         - status
         - detail
+        - instance
       properties:
         type:
           type: string
           format: uri
-          description: A URI reference that identifies the problem type.
-          example: urn:grantsupport:error:validation-failed
+          description: A URI reference (URN) that identifies the problem type.
+          example: urn:grantsupport:error:validation_error
         title:
           type: string
-          description: A short, human-readable summary of the problem type.
-          example: VALIDATION_FAILED
+          description: A short, machine-readable summary of the problem type.
+          example: VALIDATION_ERROR
         status:
           type: integer
           description: The HTTP status code generated by the origin server.
@@ -680,30 +709,15 @@ components:
         detail:
           type: string
           description: A sanitized human-readable explanation specific to this occurrence of the problem.
-          example: The request payload failed schema validation constraints.
+          example: field 'DurationMinutes' failed validation rule 'gte'
         instance:
           type: string
-          description: A URI reference identifying the specific occurrence of the problem.
+          description: A URI reference identifying the specific request path of the problem.
           example: /api/v1/auth/support/grant
-        code:
-          type: string
-          description: Machine-readable application error code.
-          example: ERR_INVALID_INPUT
         correlation_id:
           type: string
-          description: Unique correlation identifier for tracing.
+          description: Optional correlation identifier echoed when X-Correlation-ID was present on the request.
           example: 01a003f4-5678-7123-9abc-def012345678
-        validation_errors:
-          type: array
-          items:
-            type: object
-            properties:
-              field:
-                type: string
-                example: durationMinutes
-              message:
-                type: string
-                example: durationMinutes must be at least 1
 
   responses:
     RFC7807BadRequest:
@@ -715,6 +729,13 @@ components:
 
     RFC7807Unauthorized:
       description: Unauthorized (Invalid, expired, or revoked token)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/RFC7807ProblemDetails'
+
+    RFC7807NotFound:
+      description: Not Found (Requested resource or session does not exist)
       content:
         application/problem+json:
           schema:
