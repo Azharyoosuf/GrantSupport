@@ -29,7 +29,7 @@ import (
 )
 
 // Version defines the current semantic version of GrantSupport.
-const Version = "v0.1.0-beta.3"
+const Version = "v0.1.0-beta.4"
 
 // Engine is the central embeddable GrantSupport core engine instance.
 type Engine struct {
