@@ -25,180 +25,180 @@ type SupportGrantUpdate struct {
 }
 
 // Where appends a list predicates to the SupportGrantUpdate builder.
-func (sgu *SupportGrantUpdate) Where(ps ...predicate.SupportGrant) *SupportGrantUpdate {
-	sgu.mutation.Where(ps...)
-	return sgu
+func (_u *SupportGrantUpdate) Where(ps ...predicate.SupportGrant) *SupportGrantUpdate {
+	_u.mutation.Where(ps...)
+	return _u
 }
 
 // SetInstitutionID sets the "institution_id" field.
-func (sgu *SupportGrantUpdate) SetInstitutionID(u uuid.UUID) *SupportGrantUpdate {
-	sgu.mutation.SetInstitutionID(u)
-	return sgu
+func (_u *SupportGrantUpdate) SetInstitutionID(v uuid.UUID) *SupportGrantUpdate {
+	_u.mutation.SetInstitutionID(v)
+	return _u
 }
 
 // SetNillableInstitutionID sets the "institution_id" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableInstitutionID(u *uuid.UUID) *SupportGrantUpdate {
-	if u != nil {
-		sgu.SetInstitutionID(*u)
+func (_u *SupportGrantUpdate) SetNillableInstitutionID(v *uuid.UUID) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetInstitutionID(*v)
 	}
-	return sgu
+	return _u
 }
 
 // SetGrantedByID sets the "granted_by_id" field.
-func (sgu *SupportGrantUpdate) SetGrantedByID(u uuid.UUID) *SupportGrantUpdate {
-	sgu.mutation.SetGrantedByID(u)
-	return sgu
+func (_u *SupportGrantUpdate) SetGrantedByID(v uuid.UUID) *SupportGrantUpdate {
+	_u.mutation.SetGrantedByID(v)
+	return _u
 }
 
 // SetNillableGrantedByID sets the "granted_by_id" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableGrantedByID(u *uuid.UUID) *SupportGrantUpdate {
-	if u != nil {
-		sgu.SetGrantedByID(*u)
+func (_u *SupportGrantUpdate) SetNillableGrantedByID(v *uuid.UUID) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetGrantedByID(*v)
 	}
-	return sgu
+	return _u
 }
 
 // SetUsedByID sets the "used_by_id" field.
-func (sgu *SupportGrantUpdate) SetUsedByID(u uuid.UUID) *SupportGrantUpdate {
-	sgu.mutation.SetUsedByID(u)
-	return sgu
+func (_u *SupportGrantUpdate) SetUsedByID(v uuid.UUID) *SupportGrantUpdate {
+	_u.mutation.SetUsedByID(v)
+	return _u
 }
 
 // SetNillableUsedByID sets the "used_by_id" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableUsedByID(u *uuid.UUID) *SupportGrantUpdate {
-	if u != nil {
-		sgu.SetUsedByID(*u)
+func (_u *SupportGrantUpdate) SetNillableUsedByID(v *uuid.UUID) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetUsedByID(*v)
 	}
-	return sgu
+	return _u
 }
 
 // ClearUsedByID clears the value of the "used_by_id" field.
-func (sgu *SupportGrantUpdate) ClearUsedByID() *SupportGrantUpdate {
-	sgu.mutation.ClearUsedByID()
-	return sgu
+func (_u *SupportGrantUpdate) ClearUsedByID() *SupportGrantUpdate {
+	_u.mutation.ClearUsedByID()
+	return _u
 }
 
 // SetTokenHash sets the "token_hash" field.
-func (sgu *SupportGrantUpdate) SetTokenHash(s string) *SupportGrantUpdate {
-	sgu.mutation.SetTokenHash(s)
-	return sgu
+func (_u *SupportGrantUpdate) SetTokenHash(v string) *SupportGrantUpdate {
+	_u.mutation.SetTokenHash(v)
+	return _u
 }
 
 // SetNillableTokenHash sets the "token_hash" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableTokenHash(s *string) *SupportGrantUpdate {
-	if s != nil {
-		sgu.SetTokenHash(*s)
+func (_u *SupportGrantUpdate) SetNillableTokenHash(v *string) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetTokenHash(*v)
 	}
-	return sgu
+	return _u
 }
 
 // SetExpiresAt sets the "expires_at" field.
-func (sgu *SupportGrantUpdate) SetExpiresAt(t time.Time) *SupportGrantUpdate {
-	sgu.mutation.SetExpiresAt(t)
-	return sgu
+func (_u *SupportGrantUpdate) SetExpiresAt(v time.Time) *SupportGrantUpdate {
+	_u.mutation.SetExpiresAt(v)
+	return _u
 }
 
 // SetNillableExpiresAt sets the "expires_at" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableExpiresAt(t *time.Time) *SupportGrantUpdate {
-	if t != nil {
-		sgu.SetExpiresAt(*t)
+func (_u *SupportGrantUpdate) SetNillableExpiresAt(v *time.Time) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetExpiresAt(*v)
 	}
-	return sgu
+	return _u
 }
 
 // SetIsUsed sets the "is_used" field.
-func (sgu *SupportGrantUpdate) SetIsUsed(b bool) *SupportGrantUpdate {
-	sgu.mutation.SetIsUsed(b)
-	return sgu
+func (_u *SupportGrantUpdate) SetIsUsed(v bool) *SupportGrantUpdate {
+	_u.mutation.SetIsUsed(v)
+	return _u
 }
 
 // SetNillableIsUsed sets the "is_used" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableIsUsed(b *bool) *SupportGrantUpdate {
-	if b != nil {
-		sgu.SetIsUsed(*b)
+func (_u *SupportGrantUpdate) SetNillableIsUsed(v *bool) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetIsUsed(*v)
 	}
-	return sgu
+	return _u
 }
 
 // SetUsedAt sets the "used_at" field.
-func (sgu *SupportGrantUpdate) SetUsedAt(t time.Time) *SupportGrantUpdate {
-	sgu.mutation.SetUsedAt(t)
-	return sgu
+func (_u *SupportGrantUpdate) SetUsedAt(v time.Time) *SupportGrantUpdate {
+	_u.mutation.SetUsedAt(v)
+	return _u
 }
 
 // SetNillableUsedAt sets the "used_at" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableUsedAt(t *time.Time) *SupportGrantUpdate {
-	if t != nil {
-		sgu.SetUsedAt(*t)
+func (_u *SupportGrantUpdate) SetNillableUsedAt(v *time.Time) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetUsedAt(*v)
 	}
-	return sgu
+	return _u
 }
 
 // ClearUsedAt clears the value of the "used_at" field.
-func (sgu *SupportGrantUpdate) ClearUsedAt() *SupportGrantUpdate {
-	sgu.mutation.ClearUsedAt()
-	return sgu
+func (_u *SupportGrantUpdate) ClearUsedAt() *SupportGrantUpdate {
+	_u.mutation.ClearUsedAt()
+	return _u
 }
 
 // SetScope sets the "scope" field.
-func (sgu *SupportGrantUpdate) SetScope(s string) *SupportGrantUpdate {
-	sgu.mutation.SetScope(s)
-	return sgu
+func (_u *SupportGrantUpdate) SetScope(v string) *SupportGrantUpdate {
+	_u.mutation.SetScope(v)
+	return _u
 }
 
 // SetNillableScope sets the "scope" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableScope(s *string) *SupportGrantUpdate {
-	if s != nil {
-		sgu.SetScope(*s)
+func (_u *SupportGrantUpdate) SetNillableScope(v *string) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetScope(*v)
 	}
-	return sgu
+	return _u
 }
 
 // SetWhitelistedIps sets the "whitelisted_ips" field.
-func (sgu *SupportGrantUpdate) SetWhitelistedIps(s []string) *SupportGrantUpdate {
-	sgu.mutation.SetWhitelistedIps(s)
-	return sgu
+func (_u *SupportGrantUpdate) SetWhitelistedIps(v []string) *SupportGrantUpdate {
+	_u.mutation.SetWhitelistedIps(v)
+	return _u
 }
 
-// AppendWhitelistedIps appends s to the "whitelisted_ips" field.
-func (sgu *SupportGrantUpdate) AppendWhitelistedIps(s []string) *SupportGrantUpdate {
-	sgu.mutation.AppendWhitelistedIps(s)
-	return sgu
+// AppendWhitelistedIps appends value to the "whitelisted_ips" field.
+func (_u *SupportGrantUpdate) AppendWhitelistedIps(v []string) *SupportGrantUpdate {
+	_u.mutation.AppendWhitelistedIps(v)
+	return _u
 }
 
 // ClearWhitelistedIps clears the value of the "whitelisted_ips" field.
-func (sgu *SupportGrantUpdate) ClearWhitelistedIps() *SupportGrantUpdate {
-	sgu.mutation.ClearWhitelistedIps()
-	return sgu
+func (_u *SupportGrantUpdate) ClearWhitelistedIps() *SupportGrantUpdate {
+	_u.mutation.ClearWhitelistedIps()
+	return _u
 }
 
 // SetCreatedAt sets the "created_at" field.
-func (sgu *SupportGrantUpdate) SetCreatedAt(t time.Time) *SupportGrantUpdate {
-	sgu.mutation.SetCreatedAt(t)
-	return sgu
+func (_u *SupportGrantUpdate) SetCreatedAt(v time.Time) *SupportGrantUpdate {
+	_u.mutation.SetCreatedAt(v)
+	return _u
 }
 
 // SetNillableCreatedAt sets the "created_at" field if the given value is not nil.
-func (sgu *SupportGrantUpdate) SetNillableCreatedAt(t *time.Time) *SupportGrantUpdate {
-	if t != nil {
-		sgu.SetCreatedAt(*t)
+func (_u *SupportGrantUpdate) SetNillableCreatedAt(v *time.Time) *SupportGrantUpdate {
+	if v != nil {
+		_u.SetCreatedAt(*v)
 	}
-	return sgu
+	return _u
 }
 
 // Mutation returns the SupportGrantMutation object of the builder.
-func (sgu *SupportGrantUpdate) Mutation() *SupportGrantMutation {
-	return sgu.mutation
+func (_u *SupportGrantUpdate) Mutation() *SupportGrantMutation {
+	return _u.mutation
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
-func (sgu *SupportGrantUpdate) Save(ctx context.Context) (int, error) {
-	return withHooks(ctx, sgu.sqlSave, sgu.mutation, sgu.hooks)
+func (_u *SupportGrantUpdate) Save(ctx context.Context) (int, error) {
+	return withHooks(ctx, _u.sqlSave, _u.mutation, _u.hooks)
 }
 
 // SaveX is like Save, but panics if an error occurs.
-func (sgu *SupportGrantUpdate) SaveX(ctx context.Context) int {
-	affected, err := sgu.Save(ctx)
+func (_u *SupportGrantUpdate) SaveX(ctx context.Context) int {
+	affected, err := _u.Save(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -206,72 +206,72 @@ func (sgu *SupportGrantUpdate) SaveX(ctx context.Context) int {
 }
 
 // Exec executes the query.
-func (sgu *SupportGrantUpdate) Exec(ctx context.Context) error {
-	_, err := sgu.Save(ctx)
+func (_u *SupportGrantUpdate) Exec(ctx context.Context) error {
+	_, err := _u.Save(ctx)
 	return err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (sgu *SupportGrantUpdate) ExecX(ctx context.Context) {
-	if err := sgu.Exec(ctx); err != nil {
+func (_u *SupportGrantUpdate) ExecX(ctx context.Context) {
+	if err := _u.Exec(ctx); err != nil {
 		panic(err)
 	}
 }
 
-func (sgu *SupportGrantUpdate) sqlSave(ctx context.Context) (n int, err error) {
+func (_u *SupportGrantUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	_spec := sqlgraph.NewUpdateSpec(supportgrant.Table, supportgrant.Columns, sqlgraph.NewFieldSpec(supportgrant.FieldID, field.TypeUUID))
-	if ps := sgu.mutation.predicates; len(ps) > 0 {
+	if ps := _u.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
 				ps[i](selector)
 			}
 		}
 	}
-	if value, ok := sgu.mutation.InstitutionID(); ok {
+	if value, ok := _u.mutation.InstitutionID(); ok {
 		_spec.SetField(supportgrant.FieldInstitutionID, field.TypeUUID, value)
 	}
-	if value, ok := sgu.mutation.GrantedByID(); ok {
+	if value, ok := _u.mutation.GrantedByID(); ok {
 		_spec.SetField(supportgrant.FieldGrantedByID, field.TypeUUID, value)
 	}
-	if value, ok := sgu.mutation.UsedByID(); ok {
+	if value, ok := _u.mutation.UsedByID(); ok {
 		_spec.SetField(supportgrant.FieldUsedByID, field.TypeUUID, value)
 	}
-	if sgu.mutation.UsedByIDCleared() {
+	if _u.mutation.UsedByIDCleared() {
 		_spec.ClearField(supportgrant.FieldUsedByID, field.TypeUUID)
 	}
-	if value, ok := sgu.mutation.TokenHash(); ok {
+	if value, ok := _u.mutation.TokenHash(); ok {
 		_spec.SetField(supportgrant.FieldTokenHash, field.TypeString, value)
 	}
-	if value, ok := sgu.mutation.ExpiresAt(); ok {
+	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(supportgrant.FieldExpiresAt, field.TypeTime, value)
 	}
-	if value, ok := sgu.mutation.IsUsed(); ok {
+	if value, ok := _u.mutation.IsUsed(); ok {
 		_spec.SetField(supportgrant.FieldIsUsed, field.TypeBool, value)
 	}
-	if value, ok := sgu.mutation.UsedAt(); ok {
+	if value, ok := _u.mutation.UsedAt(); ok {
 		_spec.SetField(supportgrant.FieldUsedAt, field.TypeTime, value)
 	}
-	if sgu.mutation.UsedAtCleared() {
+	if _u.mutation.UsedAtCleared() {
 		_spec.ClearField(supportgrant.FieldUsedAt, field.TypeTime)
 	}
-	if value, ok := sgu.mutation.Scope(); ok {
+	if value, ok := _u.mutation.Scope(); ok {
 		_spec.SetField(supportgrant.FieldScope, field.TypeString, value)
 	}
-	if value, ok := sgu.mutation.WhitelistedIps(); ok {
+	if value, ok := _u.mutation.WhitelistedIps(); ok {
 		_spec.SetField(supportgrant.FieldWhitelistedIps, field.TypeJSON, value)
 	}
-	if value, ok := sgu.mutation.AppendedWhitelistedIps(); ok {
+	if value, ok := _u.mutation.AppendedWhitelistedIps(); ok {
 		_spec.AddModifier(func(u *sql.UpdateBuilder) {
 			sqljson.Append(u, supportgrant.FieldWhitelistedIps, value)
 		})
 	}
-	if sgu.mutation.WhitelistedIpsCleared() {
+	if _u.mutation.WhitelistedIpsCleared() {
 		_spec.ClearField(supportgrant.FieldWhitelistedIps, field.TypeJSON)
 	}
-	if value, ok := sgu.mutation.CreatedAt(); ok {
+	if value, ok := _u.mutation.CreatedAt(); ok {
 		_spec.SetField(supportgrant.FieldCreatedAt, field.TypeTime, value)
 	}
-	if n, err = sqlgraph.UpdateNodes(ctx, sgu.driver, _spec); err != nil {
+	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{supportgrant.Label}
 		} else if sqlgraph.IsConstraintError(err) {
@@ -279,8 +279,8 @@ func (sgu *SupportGrantUpdate) sqlSave(ctx context.Context) (n int, err error) {
 		}
 		return 0, err
 	}
-	sgu.mutation.done = true
-	return n, nil
+	_u.mutation.done = true
+	return _node, nil
 }
 
 // SupportGrantUpdateOne is the builder for updating a single SupportGrant entity.
@@ -292,187 +292,187 @@ type SupportGrantUpdateOne struct {
 }
 
 // SetInstitutionID sets the "institution_id" field.
-func (sguo *SupportGrantUpdateOne) SetInstitutionID(u uuid.UUID) *SupportGrantUpdateOne {
-	sguo.mutation.SetInstitutionID(u)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetInstitutionID(v uuid.UUID) *SupportGrantUpdateOne {
+	_u.mutation.SetInstitutionID(v)
+	return _u
 }
 
 // SetNillableInstitutionID sets the "institution_id" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableInstitutionID(u *uuid.UUID) *SupportGrantUpdateOne {
-	if u != nil {
-		sguo.SetInstitutionID(*u)
+func (_u *SupportGrantUpdateOne) SetNillableInstitutionID(v *uuid.UUID) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetInstitutionID(*v)
 	}
-	return sguo
+	return _u
 }
 
 // SetGrantedByID sets the "granted_by_id" field.
-func (sguo *SupportGrantUpdateOne) SetGrantedByID(u uuid.UUID) *SupportGrantUpdateOne {
-	sguo.mutation.SetGrantedByID(u)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetGrantedByID(v uuid.UUID) *SupportGrantUpdateOne {
+	_u.mutation.SetGrantedByID(v)
+	return _u
 }
 
 // SetNillableGrantedByID sets the "granted_by_id" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableGrantedByID(u *uuid.UUID) *SupportGrantUpdateOne {
-	if u != nil {
-		sguo.SetGrantedByID(*u)
+func (_u *SupportGrantUpdateOne) SetNillableGrantedByID(v *uuid.UUID) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetGrantedByID(*v)
 	}
-	return sguo
+	return _u
 }
 
 // SetUsedByID sets the "used_by_id" field.
-func (sguo *SupportGrantUpdateOne) SetUsedByID(u uuid.UUID) *SupportGrantUpdateOne {
-	sguo.mutation.SetUsedByID(u)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetUsedByID(v uuid.UUID) *SupportGrantUpdateOne {
+	_u.mutation.SetUsedByID(v)
+	return _u
 }
 
 // SetNillableUsedByID sets the "used_by_id" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableUsedByID(u *uuid.UUID) *SupportGrantUpdateOne {
-	if u != nil {
-		sguo.SetUsedByID(*u)
+func (_u *SupportGrantUpdateOne) SetNillableUsedByID(v *uuid.UUID) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetUsedByID(*v)
 	}
-	return sguo
+	return _u
 }
 
 // ClearUsedByID clears the value of the "used_by_id" field.
-func (sguo *SupportGrantUpdateOne) ClearUsedByID() *SupportGrantUpdateOne {
-	sguo.mutation.ClearUsedByID()
-	return sguo
+func (_u *SupportGrantUpdateOne) ClearUsedByID() *SupportGrantUpdateOne {
+	_u.mutation.ClearUsedByID()
+	return _u
 }
 
 // SetTokenHash sets the "token_hash" field.
-func (sguo *SupportGrantUpdateOne) SetTokenHash(s string) *SupportGrantUpdateOne {
-	sguo.mutation.SetTokenHash(s)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetTokenHash(v string) *SupportGrantUpdateOne {
+	_u.mutation.SetTokenHash(v)
+	return _u
 }
 
 // SetNillableTokenHash sets the "token_hash" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableTokenHash(s *string) *SupportGrantUpdateOne {
-	if s != nil {
-		sguo.SetTokenHash(*s)
+func (_u *SupportGrantUpdateOne) SetNillableTokenHash(v *string) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetTokenHash(*v)
 	}
-	return sguo
+	return _u
 }
 
 // SetExpiresAt sets the "expires_at" field.
-func (sguo *SupportGrantUpdateOne) SetExpiresAt(t time.Time) *SupportGrantUpdateOne {
-	sguo.mutation.SetExpiresAt(t)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetExpiresAt(v time.Time) *SupportGrantUpdateOne {
+	_u.mutation.SetExpiresAt(v)
+	return _u
 }
 
 // SetNillableExpiresAt sets the "expires_at" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableExpiresAt(t *time.Time) *SupportGrantUpdateOne {
-	if t != nil {
-		sguo.SetExpiresAt(*t)
+func (_u *SupportGrantUpdateOne) SetNillableExpiresAt(v *time.Time) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetExpiresAt(*v)
 	}
-	return sguo
+	return _u
 }
 
 // SetIsUsed sets the "is_used" field.
-func (sguo *SupportGrantUpdateOne) SetIsUsed(b bool) *SupportGrantUpdateOne {
-	sguo.mutation.SetIsUsed(b)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetIsUsed(v bool) *SupportGrantUpdateOne {
+	_u.mutation.SetIsUsed(v)
+	return _u
 }
 
 // SetNillableIsUsed sets the "is_used" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableIsUsed(b *bool) *SupportGrantUpdateOne {
-	if b != nil {
-		sguo.SetIsUsed(*b)
+func (_u *SupportGrantUpdateOne) SetNillableIsUsed(v *bool) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetIsUsed(*v)
 	}
-	return sguo
+	return _u
 }
 
 // SetUsedAt sets the "used_at" field.
-func (sguo *SupportGrantUpdateOne) SetUsedAt(t time.Time) *SupportGrantUpdateOne {
-	sguo.mutation.SetUsedAt(t)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetUsedAt(v time.Time) *SupportGrantUpdateOne {
+	_u.mutation.SetUsedAt(v)
+	return _u
 }
 
 // SetNillableUsedAt sets the "used_at" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableUsedAt(t *time.Time) *SupportGrantUpdateOne {
-	if t != nil {
-		sguo.SetUsedAt(*t)
+func (_u *SupportGrantUpdateOne) SetNillableUsedAt(v *time.Time) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetUsedAt(*v)
 	}
-	return sguo
+	return _u
 }
 
 // ClearUsedAt clears the value of the "used_at" field.
-func (sguo *SupportGrantUpdateOne) ClearUsedAt() *SupportGrantUpdateOne {
-	sguo.mutation.ClearUsedAt()
-	return sguo
+func (_u *SupportGrantUpdateOne) ClearUsedAt() *SupportGrantUpdateOne {
+	_u.mutation.ClearUsedAt()
+	return _u
 }
 
 // SetScope sets the "scope" field.
-func (sguo *SupportGrantUpdateOne) SetScope(s string) *SupportGrantUpdateOne {
-	sguo.mutation.SetScope(s)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetScope(v string) *SupportGrantUpdateOne {
+	_u.mutation.SetScope(v)
+	return _u
 }
 
 // SetNillableScope sets the "scope" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableScope(s *string) *SupportGrantUpdateOne {
-	if s != nil {
-		sguo.SetScope(*s)
+func (_u *SupportGrantUpdateOne) SetNillableScope(v *string) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetScope(*v)
 	}
-	return sguo
+	return _u
 }
 
 // SetWhitelistedIps sets the "whitelisted_ips" field.
-func (sguo *SupportGrantUpdateOne) SetWhitelistedIps(s []string) *SupportGrantUpdateOne {
-	sguo.mutation.SetWhitelistedIps(s)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetWhitelistedIps(v []string) *SupportGrantUpdateOne {
+	_u.mutation.SetWhitelistedIps(v)
+	return _u
 }
 
-// AppendWhitelistedIps appends s to the "whitelisted_ips" field.
-func (sguo *SupportGrantUpdateOne) AppendWhitelistedIps(s []string) *SupportGrantUpdateOne {
-	sguo.mutation.AppendWhitelistedIps(s)
-	return sguo
+// AppendWhitelistedIps appends value to the "whitelisted_ips" field.
+func (_u *SupportGrantUpdateOne) AppendWhitelistedIps(v []string) *SupportGrantUpdateOne {
+	_u.mutation.AppendWhitelistedIps(v)
+	return _u
 }
 
 // ClearWhitelistedIps clears the value of the "whitelisted_ips" field.
-func (sguo *SupportGrantUpdateOne) ClearWhitelistedIps() *SupportGrantUpdateOne {
-	sguo.mutation.ClearWhitelistedIps()
-	return sguo
+func (_u *SupportGrantUpdateOne) ClearWhitelistedIps() *SupportGrantUpdateOne {
+	_u.mutation.ClearWhitelistedIps()
+	return _u
 }
 
 // SetCreatedAt sets the "created_at" field.
-func (sguo *SupportGrantUpdateOne) SetCreatedAt(t time.Time) *SupportGrantUpdateOne {
-	sguo.mutation.SetCreatedAt(t)
-	return sguo
+func (_u *SupportGrantUpdateOne) SetCreatedAt(v time.Time) *SupportGrantUpdateOne {
+	_u.mutation.SetCreatedAt(v)
+	return _u
 }
 
 // SetNillableCreatedAt sets the "created_at" field if the given value is not nil.
-func (sguo *SupportGrantUpdateOne) SetNillableCreatedAt(t *time.Time) *SupportGrantUpdateOne {
-	if t != nil {
-		sguo.SetCreatedAt(*t)
+func (_u *SupportGrantUpdateOne) SetNillableCreatedAt(v *time.Time) *SupportGrantUpdateOne {
+	if v != nil {
+		_u.SetCreatedAt(*v)
 	}
-	return sguo
+	return _u
 }
 
 // Mutation returns the SupportGrantMutation object of the builder.
-func (sguo *SupportGrantUpdateOne) Mutation() *SupportGrantMutation {
-	return sguo.mutation
+func (_u *SupportGrantUpdateOne) Mutation() *SupportGrantMutation {
+	return _u.mutation
 }
 
 // Where appends a list predicates to the SupportGrantUpdate builder.
-func (sguo *SupportGrantUpdateOne) Where(ps ...predicate.SupportGrant) *SupportGrantUpdateOne {
-	sguo.mutation.Where(ps...)
-	return sguo
+func (_u *SupportGrantUpdateOne) Where(ps ...predicate.SupportGrant) *SupportGrantUpdateOne {
+	_u.mutation.Where(ps...)
+	return _u
 }
 
 // Select allows selecting one or more fields (columns) of the returned entity.
 // The default is selecting all fields defined in the entity schema.
-func (sguo *SupportGrantUpdateOne) Select(field string, fields ...string) *SupportGrantUpdateOne {
-	sguo.fields = append([]string{field}, fields...)
-	return sguo
+func (_u *SupportGrantUpdateOne) Select(field string, fields ...string) *SupportGrantUpdateOne {
+	_u.fields = append([]string{field}, fields...)
+	return _u
 }
 
 // Save executes the query and returns the updated SupportGrant entity.
-func (sguo *SupportGrantUpdateOne) Save(ctx context.Context) (*SupportGrant, error) {
-	return withHooks(ctx, sguo.sqlSave, sguo.mutation, sguo.hooks)
+func (_u *SupportGrantUpdateOne) Save(ctx context.Context) (*SupportGrant, error) {
+	return withHooks(ctx, _u.sqlSave, _u.mutation, _u.hooks)
 }
 
 // SaveX is like Save, but panics if an error occurs.
-func (sguo *SupportGrantUpdateOne) SaveX(ctx context.Context) *SupportGrant {
-	node, err := sguo.Save(ctx)
+func (_u *SupportGrantUpdateOne) SaveX(ctx context.Context) *SupportGrant {
+	node, err := _u.Save(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -480,26 +480,26 @@ func (sguo *SupportGrantUpdateOne) SaveX(ctx context.Context) *SupportGrant {
 }
 
 // Exec executes the query on the entity.
-func (sguo *SupportGrantUpdateOne) Exec(ctx context.Context) error {
-	_, err := sguo.Save(ctx)
+func (_u *SupportGrantUpdateOne) Exec(ctx context.Context) error {
+	_, err := _u.Save(ctx)
 	return err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (sguo *SupportGrantUpdateOne) ExecX(ctx context.Context) {
-	if err := sguo.Exec(ctx); err != nil {
+func (_u *SupportGrantUpdateOne) ExecX(ctx context.Context) {
+	if err := _u.Exec(ctx); err != nil {
 		panic(err)
 	}
 }
 
-func (sguo *SupportGrantUpdateOne) sqlSave(ctx context.Context) (_node *SupportGrant, err error) {
+func (_u *SupportGrantUpdateOne) sqlSave(ctx context.Context) (_node *SupportGrant, err error) {
 	_spec := sqlgraph.NewUpdateSpec(supportgrant.Table, supportgrant.Columns, sqlgraph.NewFieldSpec(supportgrant.FieldID, field.TypeUUID))
-	id, ok := sguo.mutation.ID()
+	id, ok := _u.mutation.ID()
 	if !ok {
 		return nil, &ValidationError{Name: "id", err: errors.New(`ent: missing "SupportGrant.id" for update`)}
 	}
 	_spec.Node.ID.Value = id
-	if fields := sguo.fields; len(fields) > 0 {
+	if fields := _u.fields; len(fields) > 0 {
 		_spec.Node.Columns = make([]string, 0, len(fields))
 		_spec.Node.Columns = append(_spec.Node.Columns, supportgrant.FieldID)
 		for _, f := range fields {
@@ -511,61 +511,61 @@ func (sguo *SupportGrantUpdateOne) sqlSave(ctx context.Context) (_node *SupportG
 			}
 		}
 	}
-	if ps := sguo.mutation.predicates; len(ps) > 0 {
+	if ps := _u.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
 				ps[i](selector)
 			}
 		}
 	}
-	if value, ok := sguo.mutation.InstitutionID(); ok {
+	if value, ok := _u.mutation.InstitutionID(); ok {
 		_spec.SetField(supportgrant.FieldInstitutionID, field.TypeUUID, value)
 	}
-	if value, ok := sguo.mutation.GrantedByID(); ok {
+	if value, ok := _u.mutation.GrantedByID(); ok {
 		_spec.SetField(supportgrant.FieldGrantedByID, field.TypeUUID, value)
 	}
-	if value, ok := sguo.mutation.UsedByID(); ok {
+	if value, ok := _u.mutation.UsedByID(); ok {
 		_spec.SetField(supportgrant.FieldUsedByID, field.TypeUUID, value)
 	}
-	if sguo.mutation.UsedByIDCleared() {
+	if _u.mutation.UsedByIDCleared() {
 		_spec.ClearField(supportgrant.FieldUsedByID, field.TypeUUID)
 	}
-	if value, ok := sguo.mutation.TokenHash(); ok {
+	if value, ok := _u.mutation.TokenHash(); ok {
 		_spec.SetField(supportgrant.FieldTokenHash, field.TypeString, value)
 	}
-	if value, ok := sguo.mutation.ExpiresAt(); ok {
+	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(supportgrant.FieldExpiresAt, field.TypeTime, value)
 	}
-	if value, ok := sguo.mutation.IsUsed(); ok {
+	if value, ok := _u.mutation.IsUsed(); ok {
 		_spec.SetField(supportgrant.FieldIsUsed, field.TypeBool, value)
 	}
-	if value, ok := sguo.mutation.UsedAt(); ok {
+	if value, ok := _u.mutation.UsedAt(); ok {
 		_spec.SetField(supportgrant.FieldUsedAt, field.TypeTime, value)
 	}
-	if sguo.mutation.UsedAtCleared() {
+	if _u.mutation.UsedAtCleared() {
 		_spec.ClearField(supportgrant.FieldUsedAt, field.TypeTime)
 	}
-	if value, ok := sguo.mutation.Scope(); ok {
+	if value, ok := _u.mutation.Scope(); ok {
 		_spec.SetField(supportgrant.FieldScope, field.TypeString, value)
 	}
-	if value, ok := sguo.mutation.WhitelistedIps(); ok {
+	if value, ok := _u.mutation.WhitelistedIps(); ok {
 		_spec.SetField(supportgrant.FieldWhitelistedIps, field.TypeJSON, value)
 	}
-	if value, ok := sguo.mutation.AppendedWhitelistedIps(); ok {
+	if value, ok := _u.mutation.AppendedWhitelistedIps(); ok {
 		_spec.AddModifier(func(u *sql.UpdateBuilder) {
 			sqljson.Append(u, supportgrant.FieldWhitelistedIps, value)
 		})
 	}
-	if sguo.mutation.WhitelistedIpsCleared() {
+	if _u.mutation.WhitelistedIpsCleared() {
 		_spec.ClearField(supportgrant.FieldWhitelistedIps, field.TypeJSON)
 	}
-	if value, ok := sguo.mutation.CreatedAt(); ok {
+	if value, ok := _u.mutation.CreatedAt(); ok {
 		_spec.SetField(supportgrant.FieldCreatedAt, field.TypeTime, value)
 	}
-	_node = &SupportGrant{config: sguo.config}
+	_node = &SupportGrant{config: _u.config}
 	_spec.Assign = _node.assignValues
 	_spec.ScanValues = _node.scanValues
-	if err = sqlgraph.UpdateNode(ctx, sguo.driver, _spec); err != nil {
+	if err = sqlgraph.UpdateNode(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{supportgrant.Label}
 		} else if sqlgraph.IsConstraintError(err) {
@@ -573,6 +573,6 @@ func (sguo *SupportGrantUpdateOne) sqlSave(ctx context.Context) (_node *SupportG
 		}
 		return nil, err
 	}
-	sguo.mutation.done = true
+	_u.mutation.done = true
 	return _node, nil
 }

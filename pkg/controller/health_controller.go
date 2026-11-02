@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"database/sql"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -47,7 +48,8 @@ func (c *HealthController) Ready(w http.ResponseWriter, r *http.Request) error {
 	// 1. Mandatory SQL DB Check
 	if c.sqlDB != nil {
 		if err := c.sqlDB.PingContext(ctx); err != nil {
-			return NewAppError(http.StatusServiceUnavailable, "DATABASE_UNAVAILABLE", "Primary SQL database connection ping failed: "+err.Error())
+			slog.Error("Primary SQL database readiness ping failed", slog.String("error", err.Error()))
+			return NewAppError(http.StatusServiceUnavailable, "DATABASE_UNAVAILABLE", "Primary SQL database connection ping failed")
 		}
 	}
 
@@ -57,7 +59,8 @@ func (c *HealthController) Ready(w http.ResponseWriter, r *http.Request) error {
 	if c.redisClient != nil {
 		deploymentMode = "valkey-enabled"
 		if err := c.redisClient.Ping(ctx).Err(); err != nil {
-			return NewAppError(http.StatusServiceUnavailable, "VALKEY_UNAVAILABLE", "Configured Valkey/Redis connection ping failed: "+err.Error())
+			slog.Error("Configured Valkey/Redis readiness ping failed", slog.String("error", err.Error()))
+			return NewAppError(http.StatusServiceUnavailable, "VALKEY_UNAVAILABLE", "Configured Valkey/Redis connection ping failed")
 		}
 		valkeyStatus = "UP"
 	}

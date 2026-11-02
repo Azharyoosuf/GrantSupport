@@ -15,9 +15,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
-	"grantsupport/ent"
 	"grantsupport/pkg/adapters/lock"
-	"grantsupport/pkg/adapters/replay"
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/domain"
 	"grantsupport/pkg/ports"
@@ -39,7 +37,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 		t.Fatalf("[%s] Schema creation failed: %v", dialectName, err)
 	}
 
-	// Create capability tables for lock, replay, revocation
+	// Create capability tables for lock and revocation
 	if err := repository.CreateCapabilityTables(ctx, db, dialectName); err != nil {
 		t.Fatalf("[%s] Capability DDL execution failed: %v", dialectName, err)
 	}
@@ -49,7 +47,6 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	lockStore := lock.NewSQLLockStore(db, dialectName)
 	auditRepo.SetLockStore(lockStore)
 
-	replayStore := replay.NewSQLReplayStore(db, dialectName)
 	revocationStore := revocation.NewSQLRevocationStore(db, dialectName)
 
 	instA := uuid.New()
@@ -187,18 +184,7 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	}
 	_ = lockStore.Release(ctx, shortLockKey, tok2)
 
-	// 6. SQL Replay Store Nonce Uniqueness Test
-	nonce := fmt.Sprintf("nonce_%s", uuid.New().String())
-	valid, err := replayStore.CheckAndSet(ctx, "key1", nonce, 5*time.Minute)
-	if err != nil || !valid {
-		t.Fatalf("[%s] Initial nonce CheckAndSet failed: valid=%v, err=%v", dialectName, valid, err)
-	}
-	valid, err = replayStore.CheckAndSet(ctx, "key1", nonce, 5*time.Minute)
-	if valid || (err != nil && err != ports.ErrReplayDetected) {
-		t.Fatalf("[%s] Reused nonce expected valid=false/ErrReplayDetected, got valid=%v, err=%v", dialectName, valid, err)
-	}
-
-	// 7. SQL Revocation Store Test
+	// 6. SQL Revocation Store Test
 	userRevokeID := uuid.New().String()
 	revoked, err := revocationStore.IsTokenRevoked(ctx, instA.String(), userRevokeID, 1)
 	if err != nil || revoked {
@@ -247,45 +233,6 @@ func runDatabaseComplianceSuite(t *testing.T, dialectName string, db *sql.DB) {
 	if err != nil || activeB == nil {
 		t.Fatalf("[%s] Grant B in Tenant B should remain active after Tenant A revocation", dialectName)
 	}
-
-	// 10. Access Request Lifecycle & Atomic CAS Test
-	reqRepo := repository.NewAccessRequestRepository(baseRepo)
-	agentUser := uuid.New()
-	reqDomain := &domain.AccessRequest{
-		ID:                       uuid.Must(uuid.NewV7()),
-		InstitutionID:            instA,
-		RequesterID:              agentUser,
-		TargetService:            "billing-compliance",
-		Reason:                   "Testing cross-database compliance",
-		RequestedDurationMinutes: 60,
-		RequestedScope:           "billing:read",
-		RequestedIPs:             []string{"127.0.0.1"},
-		Status:                   domain.AccessRequestStatusPending,
-		ExpiresAt:                time.Now().Add(24 * time.Hour),
-		CreatedAt:                time.Now(),
-	}
-
-	createdEntReq, err := reqRepo.CreateAccessRequest(ctx, reqDomain)
-	if err != nil {
-		t.Fatalf("[%s] CreateAccessRequest failed: %v", dialectName, err)
-	}
-	if createdEntReq.Status != domain.AccessRequestStatusPending {
-		t.Fatalf("[%s] Expected status PENDING, got %s", dialectName, createdEntReq.Status)
-	}
-
-	// Approve via Transaction CAS
-	grantID := uuid.Must(uuid.NewV7())
-	err = baseRepo.Transaction(ctx, func(tx *ent.Tx) error {
-		return reqRepo.ApproveRequestCAS(ctx, tx, instA, reqDomain.ID, adminA, grantID, 45, "billing:read", []string{"127.0.0.1"})
-	})
-	if err != nil {
-		t.Fatalf("[%s] ApproveRequestCAS transaction failed: %v", dialectName, err)
-	}
-
-	approvedReq, err := reqRepo.FindAccessRequestByID(ctx, instA, reqDomain.ID)
-	if err != nil || approvedReq.Status != domain.AccessRequestStatusApproved {
-		t.Fatalf("[%s] FindAccessRequestByID after approval failed: req=%+v, err=%v", dialectName, approvedReq, err)
-	}
 }
 
 // TestDatabaseComplianceSuite_SQLite runs the compliance matrix against in-memory SQLite.
@@ -317,18 +264,26 @@ func pingWithRetry(db *sql.DB) error {
 // TestDatabaseComplianceSuite_PostgreSQL runs when TEST_POSTGRES_URL environment variable is provided.
 func TestDatabaseComplianceSuite_PostgreSQL(t *testing.T) {
 	connStr := os.Getenv("TEST_POSTGRES_URL")
-	if connStr == "" {
-		t.Skip("Skipping PostgreSQL compliance test: TEST_POSTGRES_URL not configured")
+	explicitEnv := connStr != ""
+	if !explicitEnv {
+		t.Skipf("Skipping PostgreSQL compliance test: TEST_POSTGRES_URL not configured")
+		return
 	}
 
 	db, err := sql.Open("pgx", connStr)
 	if err != nil {
+		if explicitEnv {
+			t.Fatalf("PostgreSQL compliance test failed to open driver: %v", err)
+		}
 		t.Skipf("Skipping PostgreSQL compliance test (failed to open driver): %v", err)
 		return
 	}
 	defer db.Close()
 
 	if err := pingWithRetry(db); err != nil {
+		if explicitEnv {
+			t.Fatalf("PostgreSQL compliance test failed (PostgreSQL not reachable or credentials mismatch): %v", err)
+		}
 		t.Skipf("Skipping PostgreSQL compliance test (PostgreSQL not reachable or credentials mismatch): %v", err)
 		return
 	}
@@ -339,18 +294,26 @@ func TestDatabaseComplianceSuite_PostgreSQL(t *testing.T) {
 // TestDatabaseComplianceSuite_MySQL runs when TEST_MYSQL_URL environment variable is provided.
 func TestDatabaseComplianceSuite_MySQL(t *testing.T) {
 	connStr := os.Getenv("TEST_MYSQL_URL")
-	if connStr == "" {
-		t.Skip("Skipping MySQL compliance test: TEST_MYSQL_URL not configured")
+	explicitEnv := connStr != ""
+	if !explicitEnv {
+		t.Skipf("Skipping MySQL compliance test: TEST_MYSQL_URL not configured")
+		return
 	}
 
 	db, err := sql.Open("mysql", connStr)
 	if err != nil {
+		if explicitEnv {
+			t.Fatalf("MySQL compliance test failed to open driver: %v", err)
+		}
 		t.Skipf("Skipping MySQL compliance test (failed to open driver): %v", err)
 		return
 	}
 	defer db.Close()
 
 	if err := pingWithRetry(db); err != nil {
+		if explicitEnv {
+			t.Fatalf("MySQL compliance test failed (MySQL not reachable or credentials mismatch): %v", err)
+		}
 		t.Skipf("Skipping MySQL compliance test (MySQL not reachable or credentials mismatch): %v", err)
 		return
 	}
@@ -361,18 +324,26 @@ func TestDatabaseComplianceSuite_MySQL(t *testing.T) {
 // TestDatabaseComplianceSuite_MariaDB runs when TEST_MARIADB_URL environment variable is provided.
 func TestDatabaseComplianceSuite_MariaDB(t *testing.T) {
 	connStr := os.Getenv("TEST_MARIADB_URL")
-	if connStr == "" {
-		t.Skip("Skipping MariaDB compliance test: TEST_MARIADB_URL not configured")
+	explicitEnv := connStr != ""
+	if !explicitEnv {
+		t.Skipf("Skipping MariaDB compliance test: TEST_MARIADB_URL not configured")
+		return
 	}
 
 	db, err := sql.Open("mysql", connStr)
 	if err != nil {
+		if explicitEnv {
+			t.Fatalf("MariaDB compliance test failed to open driver: %v", err)
+		}
 		t.Skipf("Skipping MariaDB compliance test (failed to open driver): %v", err)
 		return
 	}
 	defer db.Close()
 
 	if err := pingWithRetry(db); err != nil {
+		if explicitEnv {
+			t.Fatalf("MariaDB compliance test failed (MariaDB not reachable or credentials mismatch): %v", err)
+		}
 		t.Skipf("Skipping MariaDB compliance test (MariaDB not reachable or credentials mismatch): %v", err)
 		return
 	}

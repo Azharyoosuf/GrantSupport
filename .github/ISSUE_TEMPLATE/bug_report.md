@@ -24,7 +24,7 @@ A clear and concise description of what you expected to happen.
 
 ## Environment & Backends
 - **GrantSupport Version**: (e.g. `v1.0.0` or git commit SHA)
-- **Database Engine**: (PostgreSQL 16 / MySQL 8.4 / MariaDB 11.4 / SQLite)
+- **Database Engine**: (PostgreSQL 16+ / MySQL 8.0+ / MariaDB 10.5+ / SQLite 3)
 - **Cache Engine**: (Valkey 7.2 / Redis 7 / None)
 - **OS / Architecture**: (Linux x64, macOS ARM64, Windows x64)
 - **Deployment Mode**: (Docker Compose / Standalone Binary / Embedded Go)

@@ -18,7 +18,6 @@ type EngineConfig struct {
 	EntClient       *ent.Client
 	RedisClient     *redis.Client
 	LockStore       ports.LockStore
-	ReplayStore     ports.ReplayStore
 	RevocationStore ports.RevocationStore
 	RateLimiter     ports.RateLimiterStore
 	PrivateKeyPEM   []byte
@@ -67,13 +66,6 @@ func WithLockStore(store ports.LockStore) Option {
 	}
 }
 
-// WithReplayStore provides a custom ReplayStore adapter for nonce validation.
-func WithReplayStore(store ports.ReplayStore) Option {
-	return func(c *EngineConfig) {
-		c.ReplayStore = store
-	}
-}
-
 // WithRevocationStore provides a custom RevocationStore adapter.
 func WithRevocationStore(store ports.RevocationStore) Option {
 	return func(c *EngineConfig) {
@@ -118,8 +110,8 @@ func WithEnvironment(env string) Option {
 	}
 }
 
-// WithRedisClient configures an optional Valkey/Redis client for readiness health checking.
-func WithRedisClient(client *redis.Client) Option {
+// WithRedis configures an optional Valkey/Redis client for distributed locking, session revocation, rate limiting, and readiness health checking.
+func WithRedis(client *redis.Client) Option {
 	return func(c *EngineConfig) {
 		c.RedisClient = client
 	}

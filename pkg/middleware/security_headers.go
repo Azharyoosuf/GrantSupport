@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"grantsupport/pkg/config"
+	"grantsupport/pkg/security"
 )
 
 // SecurityHeadersMiddleware injects standard HTTP security headers appropriate for a production API.
@@ -26,7 +27,7 @@ func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 				socketHost = host
 			}
 			socketHost = strings.TrimSpace(socketHost)
-			if len(trustedProxies) > 0 && ValidateIPWhitelist(socketHost, trustedProxies) {
+			if len(trustedProxies) > 0 && security.ValidateIPWhitelist(socketHost, trustedProxies) {
 				if proto := strings.ToLower(r.Header.Get("X-Forwarded-Proto")); proto == "https" {
 					isHTTPS = true
 				}

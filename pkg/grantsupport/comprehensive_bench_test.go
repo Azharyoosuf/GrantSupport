@@ -91,7 +91,7 @@ func BenchmarkCrypto_TokenGeneration(b *testing.B) {
 	b.ReportAllocs()
 	buf := make([]byte, 32)
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = rand.Read(buf)
 		_ = hex.EncodeToString(buf)
 	}
@@ -101,7 +101,7 @@ func BenchmarkCrypto_SHA256Hashing(b *testing.B) {
 	b.ReportAllocs()
 	token := "6ba7b810-9dad-11d1-80b4-00c04fd430c8_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		h := sha256.Sum256([]byte(token))
 		_ = hex.EncodeToString(h[:])
 	}
@@ -115,7 +115,7 @@ func BenchmarkValidation_GrantSupportInput(b *testing.B) {
 		Scope:           "FULL_ACCESS",
 	}
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_ = validate.Struct(input)
 	}
 }
@@ -146,7 +146,7 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 			name:       "PostgreSQL 16",
 			driver:     "pgx",
 			envVar:     "TEST_POSTGRES_URL",
-			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable",
+			defaultDSN: "postgresql://grantsupport:secretpassword@127.0.0.1:5432/grantsupport?sslmode=disable",
 		},
 		{
 			name:       "MySQL 8.4",
@@ -165,12 +165,16 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 	for _, target := range targets {
 		t.Run(target.name, func(t *testing.T) {
 			dsn := target.defaultDSN
-			if target.envVar != "" && os.Getenv(target.envVar) != "" {
+			explicitEnv := target.envVar != "" && os.Getenv(target.envVar) != ""
+			if explicitEnv {
 				dsn = os.Getenv(target.envVar)
 			}
 
 			db, err := sql.Open(target.driver, dsn)
 			if err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Failed to open database (%s): %v", target.name, target.envVar, err)
+				}
 				t.Skipf("Skipping %s: %v", target.name, err)
 				return
 			}
@@ -183,6 +187,9 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 			pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 			defer cancel()
 			if err := db.PingContext(pingCtx); err != nil {
+				if explicitEnv {
+					t.Fatalf("[%s] Database unreachable (%s): %v", target.name, target.envVar, err)
+				}
 				t.Skipf("Skipping %s (unreachable on %s): %v", target.name, dsn, err)
 				return
 			}
@@ -212,7 +219,9 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 			lockStore := lock.NewSQLLockStore(db, dialect)
 			revStore := revocation.NewSQLRevocationStore(db, dialect)
 
-			svc := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+			auditRepo.SetLockStore(lockStore)
+
+			svc := service.NewGrantSupportService(grantRepo, auditRepo)
 			svc.SetRevocationStore(revStore)
 
 			instID := uuid.New()
@@ -221,7 +230,7 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 
 			// Warm-up 10 iterations
 			for i := 0; i < 10; i++ {
-				tok, _ := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+				tok, _ := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 				if tok != "" {
 					_, _, _ = svc.SupportLogin(ctx, tok, agentID)
 				}
@@ -235,7 +244,7 @@ func TestRealDatabaseBenchmarks(t *testing.T) {
 
 			for i := 0; i < numOps; i++ {
 				t0 := time.Now()
-				tok, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+				tok, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 				d := time.Since(t0)
 				if err != nil {
 					t.Fatalf("CreateSupportGrant failed: %v", err)
@@ -601,12 +610,24 @@ func TestDatabaseQueryPlans(t *testing.T) {
 	ctx := context.Background()
 
 	// 1. PostgreSQL EXPLAIN ANALYZE
-	pgDSN := "postgresql://grantsupport:secretpassword@127.0.0.1:5433/grantsupport?sslmode=disable"
+	pgDSN := "postgresql://grantsupport:secretpassword@127.0.0.1:5432/grantsupport?sslmode=disable"
+	pgExplicit := false
 	if env := os.Getenv("TEST_POSTGRES_URL"); env != "" {
 		pgDSN = env
+		pgExplicit = true
 	}
 
 	pgDB, err := sql.Open("pgx", pgDSN)
+	if err != nil && pgExplicit {
+		t.Fatalf("PostgreSQL EXPLAIN failed to open database (TEST_POSTGRES_URL): %v", err)
+	}
+	if err == nil {
+		pingErr := pgDB.Ping()
+		if pingErr != nil && pgExplicit {
+			_ = pgDB.Close()
+			t.Fatalf("PostgreSQL EXPLAIN database unreachable (TEST_POSTGRES_URL): %v", pingErr)
+		}
+	}
 	if err == nil && pgDB.Ping() == nil {
 		defer pgDB.Close()
 		t.Log("--- PostgreSQL 16 EXPLAIN (ANALYZE, BUFFERS) ---")
@@ -649,28 +670,62 @@ func TestDatabaseQueryPlans(t *testing.T) {
 
 	// 2. MySQL EXPLAIN
 	myDSN := "grantsupport:secretpassword@tcp(127.0.0.1:3306)/grantsupport?parseTime=true"
+	myExplicit := false
 	if env := os.Getenv("TEST_MYSQL_URL"); env != "" {
 		myDSN = env
+		myExplicit = true
 	}
 
 	myDB, err := sql.Open("mysql", myDSN)
+	if err != nil && myExplicit {
+		t.Fatalf("MySQL EXPLAIN failed to open database (TEST_MYSQL_URL): %v", err)
+	}
+	if err == nil {
+		pingErr := myDB.Ping()
+		if pingErr != nil && myExplicit {
+			_ = myDB.Close()
+			t.Fatalf("MySQL EXPLAIN database unreachable (TEST_MYSQL_URL): %v", pingErr)
+		}
+	}
 	if err == nil && myDB.Ping() == nil {
 		defer myDB.Close()
 		t.Log("--- MySQL 8.4 EXPLAIN ---")
+
+		if err := repository.CreateCapabilityTables(ctx, myDB, "mysql"); err != nil {
+			t.Fatalf("MySQL EXPLAIN CreateCapabilityTables failed: %v", err)
+		}
+		revStore := revocation.NewSQLRevocationStore(myDB, "mysql")
+		if err := revStore.RevokeUserSessions(ctx, "00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002", 2); err != nil {
+			t.Fatalf("MySQL EXPLAIN failed to seed gs_revocations row: %v", err)
+		}
 
 		rows, err := myDB.QueryContext(ctx, `
 			EXPLAIN SELECT token_version FROM gs_revocations 
 			WHERE institution_id = '00000000-0000-0000-0000-000000000001' AND user_id = '00000000-0000-0000-0000-000000000002'
 		`)
-		if err == nil {
-			cols, _ := rows.Columns()
-			t.Logf("MySQL EXPLAIN columns: %v", cols)
-			for rows.Next() {
-				var id, selectType, table, partitions, pType, possibleKeys, key, keyLen, ref, rowsCount, filtered, extra sql.NullString
-				_ = rows.Scan(&id, &selectType, &table, &partitions, &pType, &possibleKeys, &key, &keyLen, &ref, &rowsCount, &filtered, &extra)
-				t.Logf("Table: %s | Type: %s | Key: %s | Rows: %s", table.String, pType.String, key.String, rowsCount.String)
+		if err != nil {
+			t.Fatalf("MySQL EXPLAIN query failed: %v", err)
+		}
+		defer rows.Close()
+
+		cols, err := rows.Columns()
+		if err != nil {
+			t.Fatalf("MySQL EXPLAIN Columns() failed: %v", err)
+		}
+		t.Logf("MySQL EXPLAIN columns: %v", cols)
+		for rows.Next() {
+			var id, selectType, table, partitions, pType, possibleKeys, key, keyLen, ref, rowsCount, filtered, extra sql.NullString
+			if err := rows.Scan(&id, &selectType, &table, &partitions, &pType, &possibleKeys, &key, &keyLen, &ref, &rowsCount, &filtered, &extra); err != nil {
+				t.Fatalf("MySQL EXPLAIN Scan failed: %v", err)
 			}
-			rows.Close()
+			t.Logf("ID: %s | SelectType: %s | Table: %s | Type: %s | PossibleKeys: %s | Key: %s | KeyLen: %s | Ref: %s | Rows: %s | Filtered: %s | Extra: %s",
+				id.String, selectType.String, table.String, pType.String, possibleKeys.String, key.String, keyLen.String, ref.String, rowsCount.String, filtered.String, extra.String)
+			if table.String == "" || pType.String == "" || key.String == "" {
+				t.Fatalf("expected non-empty MySQL EXPLAIN columns (table=%q, type=%q, key=%q)", table.String, pType.String, key.String)
+			}
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatalf("MySQL EXPLAIN row iteration failed: %v", err)
 		}
 	}
 }

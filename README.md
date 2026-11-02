@@ -36,6 +36,7 @@ To maintain a strict security boundary and operational simplicity, GrantSupport 
 * **NOT a Database / API Proxy**: Does not sit in the data path of your database queries or inspect API payload bodies.
 * **NOT a Messaging Service**: Does not provide notification channels (email, Slack, SMS, or ticketing systems) for delivering bearer tokens. The host application or administrator is responsible for relaying the single-use token through trusted operational channels.
 * **NOT a Permissions Engine**: Passes the requested `scope` string into the JWT claims; your host application remains responsible for evaluating and enforcing domain permissions.
+* **NOT a Ticketing or Approval Workflow Engine**: Approval or ticketing workflows belong in the host application, which calls `POST /api/v1/auth/support/grant` once a request is approved.
 
 ---
 
@@ -84,15 +85,32 @@ curl http://localhost:8080/health/ready
 
 GrantSupport is designed as a lightweight application-layer service. In the `v0.1.0-beta.3` reference validation environment, the measured resource footprint and performance baseline were as follows:
 
-### 5.1 Resource Footprint
-* **Final Docker Image Size**: **12.5 MB** compressed download / **39.4 MB** uncompressed content.
-* **Go Static Binary Size**: **32.3 MB** (stripped with `-ldflags="-w -s"`).
-* **Idle Memory (RSS)**: Approximately **6.08 MiB** (single container).
-* **Under-Load Memory (250 Workers)**: Remained **< 15.0 MiB** RSS.
+### 5.1 Resource Footprint (Approximate Reference Figures)
+> [!NOTE]
+> The binary size, container image size, and memory RSS figures below are **approximate, unmeasured reference observations** from a single development container and are not verified by automated tests. You can measure them on your target machine using:
+> - **Static Binary Size**: `CGO_ENABLED=0 go build -ldflags="-w -s" -o grantsupport ./cmd/server && ls -lh grantsupport`
+> - **Docker Image Size**: `docker build -t grantsupport . && docker image inspect grantsupport --format='{{.Size}}'`
+> - **Container Memory (RSS)**: `docker stats --no-stream`
+
+* **Final Docker Image Size**: ~**12.5 MB** compressed download / ~**39.4 MB** uncompressed content (approximate).
+* **Go Static Binary Size**: ~**32.3 MB** stripped with `-ldflags="-w -s"` (approximate; varies by Go version and target architecture).
+* **Idle Memory (RSS)**: Approximately **6.08 MiB** (single container, approximate).
+* **Under-Load Memory (250 Workers)**: Remained **< 15.0 MiB** RSS (approximate).
 * **Idle CPU Usage**: **0.00%**.
 * **Startup to Ready**: **< 200 ms**.
 
 ### 5.2 Reference Performance Baseline
+
+To reproduce the embedded and live-database benchmarks locally against running PostgreSQL (`5432`), MySQL (`3306`), MariaDB (`3307`), and Valkey (`6379`) containers:
+```bash
+TEST_POSTGRES_URL="postgresql://grantsupport:secretpassword@127.0.0.1:5432/grantsupport?sslmode=disable" \
+TEST_MYSQL_URL="grantsupport:secretpassword@tcp(127.0.0.1:3306)/grantsupport?parseTime=true" \
+TEST_MARIADB_URL="grantsupport:secretpassword@tcp(127.0.0.1:3307)/grantsupport?parseTime=true" \
+VALKEY_CACHE_URL="valkey://127.0.0.1:6379/0" \
+go test -v -run "TestRealDatabaseBenchmarks|TestConcurrencyBenchmarks" ./pkg/grantsupport
+```
+
+#### Environment A — Windows 11 (`x86_64`)
 *Measurements gathered in reference validation environment (12th Gen Intel Core i5-12450H, 16 GB RAM, Windows 11 / Docker Linux container).*
 
 | Operation | Environment | Throughput | p50 Latency | p95 Latency | p99 Latency |
@@ -105,6 +123,23 @@ GrantSupport is designed as a lightweight application-layer service. In the `v0.
 | **SupportLogin (Redeem)** | MySQL 8.4 (Network) | 38.7 req/s | 25.02 ms | 35.29 ms | — |
 | **Concurrency Scaling** | 1 $\rightarrow$ 250 Workers | 296.6 $\rightarrow$ 922.2 req/s | — | — | 0 Errors |
 
+#### Environment B — macOS Apple Silicon (`ARM64`)
+*Measurements gathered in reference validation environment (Apple M5, 24 GB Unified Memory, macOS ARM64 / Docker Linux container) via `TestRealDatabaseBenchmarks` and `TestConcurrencyBenchmarks` (embedded Go engine calling embedded in-memory SQLite vs. real PostgreSQL 16, MySQL 8.4, and MariaDB 11.4 Docker database containers).*
+
+| Operation | Environment (Engine + Backend) | Throughput | p50 Latency | p95 Latency | p99 Latency |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **CreateSupportGrant** | Embedded Engine + SQLite (In-Memory) | 13,945.1 req/s | 0.07 ms | 0.08 ms | 0.10 ms |
+| **SupportLogin (Redeem)** | Embedded Engine + SQLite (In-Memory) | 1,399.8 req/s | 0.71 ms | 0.74 ms | 0.96 ms |
+| **RevokeSupportGrant** | Embedded Engine + SQLite (In-Memory) | 7,339.7 req/s | 0.12 ms | 0.26 ms | 0.26 ms |
+| **IsTokenRevoked** | Embedded Engine + SQL In-Memory | 282,418.9 req/s | < 0.01 ms | < 0.01 ms | 0.02 ms |
+| **CreateSupportGrant** | Embedded Engine + PostgreSQL 16 (Docker Network) | 243.5 req/s | 3.47 ms | 10.35 ms | 15.17 ms |
+| **SupportLogin (Redeem)** | Embedded Engine + PostgreSQL 16 (Docker Network) | 363.2 req/s | 2.11 ms | 5.45 ms | 8.67 ms |
+| **CreateSupportGrant** | Embedded Engine + MySQL 8.4 (Docker Network) | 216.7 req/s | 4.31 ms | 6.24 ms | 7.45 ms |
+| **SupportLogin (Redeem)** | Embedded Engine + MySQL 8.4 (Docker Network) | 240.9 req/s | 4.31 ms | 5.76 ms | 6.13 ms |
+| **CreateSupportGrant** | Embedded Engine + MariaDB 11.4 (Docker Network) | 366.9 req/s | 2.55 ms | 3.30 ms | 8.26 ms |
+| **SupportLogin (Redeem)** | Embedded Engine + MariaDB 11.4 (Docker Network) | 451.3 req/s | 2.05 ms | 2.59 ms | 5.78 ms |
+| **Concurrency Scaling** | 1 $\rightarrow$ 250 Workers (Embedded Engine + SQLite In-Memory) | 1,338.3 $\rightarrow$ 4,739.8 req/s | — | — | 0 Errors |
+
 > [!NOTE]
 > These figures are reference measurements from the specific `v0.1.0-beta.3` validation environment. They are **not** universal performance guarantees or production capacity claims. Real-world performance depends heavily on database engine, network latency, disk I/O, and deployment topology.
 
@@ -112,12 +147,11 @@ GrantSupport is designed as a lightweight application-layer service. In the `v0.
 
 ## 6. Key Security Invariants
 
-* **Cross-Tenant Isolation**: Hard SQL constraints and query scoping ensure Tenant A cannot view, approve, modify, or revoke Tenant B tokens or access requests.
-* **Self-Approval Prohibition**: Support agents are mathematically prevented from approving their own access requests (`SELF_APPROVAL_FORBIDDEN`).
-* **Zero Token Persistence**: Single-use raw bearer tokens are returned exactly once upon creation/approval and stored exclusively as SHA-256 hashes in `gs_support_grants`.
+* **Cross-Tenant Isolation**: Hard SQL constraints and query scoping ensure Tenant A cannot view, modify, or revoke Tenant B tokens or sessions.
+* **Zero Token Persistence**: Single-use raw bearer tokens are returned exactly once upon creation and stored exclusively as SHA-256 hashes in `gs_support_grants`.
 * **Fail-Closed Verification**: Unknown key IDs (`kid`), expired grants, and tampering fail closed immediately.
 * **Cryptographic Hash Chaining**: Every lifecycle mutation writes an append-only, SHA-256 chained entry into `gs_audit_events`.
-* **Token Delivery Boundary**: Approval controls whether access may be granted. GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel.
+* **Token Delivery Boundary**: GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel.
 
 ---
 
@@ -130,25 +164,17 @@ GrantSupport exposes a clean, secure REST surface. The authoritative OpenAPI 3.1
 2. **`GET /metrics`** (Public / SRE Network) — Native Prometheus metrics exposition format with bounded cardinality.
 3. **`GET /.well-known/jwks.json`** (Public) — RFC 7517 JWKS with public RSA keys and `kid` tracking.
 
-### Just-In-Time Access Request & Approval Workflow
-4. **`POST /api/v1/access-requests`** (Support Agent JWT, Rate-limited) — Submit JIT access request with reason, duration, and scope.
-5. **`GET /api/v1/access-requests`** (Admin or Agent JWT) — Query paginated access requests for the tenant.
-6. **`GET /api/v1/access-requests/{id}`** (Admin or Agent JWT) — Retrieve specific access request details.
-7. **`POST /api/v1/access-requests/{id}/approve`** (Admin JWT, Rate-limited) — Customer admin approves request, generating single-use grant token.
-8. **`POST /api/v1/access-requests/{id}/reject`** (Admin JWT, Rate-limited) — Customer admin rejects request with reason.
-9. **`POST /api/v1/access-requests/{id}/cancel`** (Admin or Agent JWT) — Cancels a pending access request.
-
 ### Direct Delegation & Session Management
-10. **`POST /api/v1/auth/support/grant`** (Admin JWT, Rate-limited) — Customer admin creates a direct time-bounded delegation grant.
-11. **`POST /api/v1/auth/support/login`** (Public, Rate-limited) — Support agent claims single-use token and receives short-lived RS256 JWT.
-12. **`GET /api/v1/auth/support/sessions`** (Admin JWT) — Lists active redeemed support sessions for tenant.
-13. **`DELETE /api/v1/auth/support/sessions/{grantId}`** (Admin JWT) — Terminates a specific active support session.
-14. **`POST /api/v1/auth/support/logout`** (Support Agent JWT) — Agent voluntary session logout.
-15. **`POST /api/v1/auth/support/revoke`** (Admin JWT, Rate-limited) — Tenant-wide revocation of all pending grants and active sessions.
+4. **`POST /api/v1/auth/support/grant`** (Admin JWT, Rate-limited) — Customer admin creates a direct time-bounded delegation grant.
+5. **`POST /api/v1/auth/support/login`** (Public, Rate-limited) — Support agent claims single-use token and receives short-lived RS256 JWT.
+6. **`GET /api/v1/auth/support/sessions`** (Admin JWT) — Lists active redeemed support sessions for tenant.
+7. **`DELETE /api/v1/auth/support/sessions/{grantId}`** (Admin JWT) — Terminates a specific active support session.
+8. **`POST /api/v1/auth/support/logout`** (Support Agent JWT) — Agent voluntary session logout.
+9. **`POST /api/v1/auth/support/revoke`** (Admin JWT, Rate-limited) — Tenant-wide revocation of all pending grants and active sessions.
 
 ### Cryptographic Audit Ledger
-16. **`GET /api/v1/audit/events`** (Admin JWT) — Paginated audit log retrieval.
-17. **`POST /api/v1/audit/verify`** (Admin JWT) — Cryptographically verifies unbroken SHA-256 hash chain with optional actor and event_type filtering.
+10. **`GET /api/v1/audit/events`** (Admin JWT) — Paginated audit log retrieval.
+11. **`POST /api/v1/audit/verify`** (Admin JWT) — Cryptographically verifies unbroken SHA-256 hash chain with optional actor and event_type filtering.
 
 ---
 
@@ -178,6 +204,10 @@ func main() {
 	engine, err := grantsupport.NewEngine(
 		grantsupport.WithDB(db, "sqlite"),
 		grantsupport.WithAutoMigrate(true),
+		// Optional: wire Valkey/Redis for distributed locks, revocation cache, and rate limiting:
+		// grantsupport.WithRedis(redisClient),
+		// Optional: configure trusted reverse-proxy CIDRs when mounting engine.HTTPHandler():
+		// grantsupport.WithTrustedProxies([]string{"127.0.0.1", "::1", "172.16.0.0/12"}),
 	)
 	if err != nil {
 		log.Fatalf("Failed to initialize GrantSupport: %v", err)
@@ -192,6 +222,49 @@ func main() {
 }
 ```
 
+### Path C: Reverse Proxies & `TRUSTED_PROXIES` (Required Behind nginx, Traefik, Cloudflare, or Docker)
+
+GrantSupport **does not blindly trust** `CF-Connecting-IP`, `X-Real-IP`, or `X-Forwarded-For` headers. `security.ExtractClientIP` only honors forwarded IP headers when the immediate TCP peer (`r.RemoteAddr`) matches an entry in `TRUSTED_PROXIES` (default: `127.0.0.1,::1`) or `grantsupport.WithTrustedProxies(...)`.
+
+> [!IMPORTANT]
+> If you deploy GrantSupport behind **nginx**, **Traefik**, **Cloudflare**, an **AWS ALB**, or inside a **Docker bridge network**, the immediate TCP connection comes from the proxy container or load balancer IP (not `127.0.0.1`). You **must** set `TRUSTED_PROXIES` to the IP or CIDR of your reverse proxy. Otherwise:
+> 1. **Per-IP rate limiting** will bucket all external users under the reverse proxy's single IP address.
+> 2. **Per-grant `whitelisted_ips` enforcement** at `/api/v1/auth/support/login` will compare the grant's whitelist against the proxy's internal IP instead of the support agent's real IP.
+
+Example `docker-compose.yml` running behind an nginx or Traefik reverse proxy on a dedicated Docker subnet:
+
+```yaml
+services:
+  reverse-proxy:
+    image: nginx:1.27-alpine
+    ports:
+      - "443:443"
+    networks:
+      grantsupport_net:
+        ipv4_address: 172.28.0.10
+
+  grantsupport:
+    build: .
+    environment:
+      PORT: "8080"
+      DATABASE_DIALECT: postgres
+      DATABASE_URL: postgresql://grantsupport:secretpassword@postgres:5432/grantsupport?sslmode=disable
+      # Trust only the reverse-proxy container IP (or subnet CIDR) to supply X-Forwarded-For / X-Real-IP:
+      TRUSTED_PROXIES: "127.0.0.1,::1,172.28.0.10/32"
+      # Optional Valkey URL (unset/empty by default for SQL-only mode):
+      VALKEY_CACHE_URL: "valkey://valkey:6379/0"
+    networks:
+      grantsupport_net:
+        ipv4_address: 172.28.0.20
+
+networks:
+  grantsupport_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+```
+
 ---
 
 ## 9. Security Model
@@ -201,9 +274,8 @@ func main() {
 * Active session revocation is verified against the `RevocationStore`.
 * If the revocation store fails, requests fail closed with HTTP 503 `REVOCATION_CHECK_UNAVAILABLE`.
 
-### Optional: BulletproofAuth (For Go Embedders)
-* `engine.BulletproofMiddleware(keyStore)` provides an opt-in 5-layer Ed25519 request-signing verification layer for custom machine-to-machine Go routes.
-* **Note**: BulletproofAuth is an opt-in middleware for embedded Go applications and is **not** automatically applied to default public HTTP endpoints.
+### Companion Project: BulletproofAuth
+* The Ed25519 per-request HTTP signing and nonce replay protection middleware formerly bundled in GrantSupport now lives in its own standalone repository: [`github.com/azharyoosuf/bulletproofauth`](https://github.com/azharyoosuf/bulletproofauth).
 
 For full technical specifications, see [`docs/SECURITY_MODEL.md`](docs/SECURITY_MODEL.md).
 

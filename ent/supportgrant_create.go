@@ -22,133 +22,133 @@ type SupportGrantCreate struct {
 }
 
 // SetInstitutionID sets the "institution_id" field.
-func (sgc *SupportGrantCreate) SetInstitutionID(u uuid.UUID) *SupportGrantCreate {
-	sgc.mutation.SetInstitutionID(u)
-	return sgc
+func (_c *SupportGrantCreate) SetInstitutionID(v uuid.UUID) *SupportGrantCreate {
+	_c.mutation.SetInstitutionID(v)
+	return _c
 }
 
 // SetGrantedByID sets the "granted_by_id" field.
-func (sgc *SupportGrantCreate) SetGrantedByID(u uuid.UUID) *SupportGrantCreate {
-	sgc.mutation.SetGrantedByID(u)
-	return sgc
+func (_c *SupportGrantCreate) SetGrantedByID(v uuid.UUID) *SupportGrantCreate {
+	_c.mutation.SetGrantedByID(v)
+	return _c
 }
 
 // SetUsedByID sets the "used_by_id" field.
-func (sgc *SupportGrantCreate) SetUsedByID(u uuid.UUID) *SupportGrantCreate {
-	sgc.mutation.SetUsedByID(u)
-	return sgc
+func (_c *SupportGrantCreate) SetUsedByID(v uuid.UUID) *SupportGrantCreate {
+	_c.mutation.SetUsedByID(v)
+	return _c
 }
 
 // SetNillableUsedByID sets the "used_by_id" field if the given value is not nil.
-func (sgc *SupportGrantCreate) SetNillableUsedByID(u *uuid.UUID) *SupportGrantCreate {
-	if u != nil {
-		sgc.SetUsedByID(*u)
+func (_c *SupportGrantCreate) SetNillableUsedByID(v *uuid.UUID) *SupportGrantCreate {
+	if v != nil {
+		_c.SetUsedByID(*v)
 	}
-	return sgc
+	return _c
 }
 
 // SetTokenHash sets the "token_hash" field.
-func (sgc *SupportGrantCreate) SetTokenHash(s string) *SupportGrantCreate {
-	sgc.mutation.SetTokenHash(s)
-	return sgc
+func (_c *SupportGrantCreate) SetTokenHash(v string) *SupportGrantCreate {
+	_c.mutation.SetTokenHash(v)
+	return _c
 }
 
 // SetExpiresAt sets the "expires_at" field.
-func (sgc *SupportGrantCreate) SetExpiresAt(t time.Time) *SupportGrantCreate {
-	sgc.mutation.SetExpiresAt(t)
-	return sgc
+func (_c *SupportGrantCreate) SetExpiresAt(v time.Time) *SupportGrantCreate {
+	_c.mutation.SetExpiresAt(v)
+	return _c
 }
 
 // SetIsUsed sets the "is_used" field.
-func (sgc *SupportGrantCreate) SetIsUsed(b bool) *SupportGrantCreate {
-	sgc.mutation.SetIsUsed(b)
-	return sgc
+func (_c *SupportGrantCreate) SetIsUsed(v bool) *SupportGrantCreate {
+	_c.mutation.SetIsUsed(v)
+	return _c
 }
 
 // SetNillableIsUsed sets the "is_used" field if the given value is not nil.
-func (sgc *SupportGrantCreate) SetNillableIsUsed(b *bool) *SupportGrantCreate {
-	if b != nil {
-		sgc.SetIsUsed(*b)
+func (_c *SupportGrantCreate) SetNillableIsUsed(v *bool) *SupportGrantCreate {
+	if v != nil {
+		_c.SetIsUsed(*v)
 	}
-	return sgc
+	return _c
 }
 
 // SetUsedAt sets the "used_at" field.
-func (sgc *SupportGrantCreate) SetUsedAt(t time.Time) *SupportGrantCreate {
-	sgc.mutation.SetUsedAt(t)
-	return sgc
+func (_c *SupportGrantCreate) SetUsedAt(v time.Time) *SupportGrantCreate {
+	_c.mutation.SetUsedAt(v)
+	return _c
 }
 
 // SetNillableUsedAt sets the "used_at" field if the given value is not nil.
-func (sgc *SupportGrantCreate) SetNillableUsedAt(t *time.Time) *SupportGrantCreate {
-	if t != nil {
-		sgc.SetUsedAt(*t)
+func (_c *SupportGrantCreate) SetNillableUsedAt(v *time.Time) *SupportGrantCreate {
+	if v != nil {
+		_c.SetUsedAt(*v)
 	}
-	return sgc
+	return _c
 }
 
 // SetScope sets the "scope" field.
-func (sgc *SupportGrantCreate) SetScope(s string) *SupportGrantCreate {
-	sgc.mutation.SetScope(s)
-	return sgc
+func (_c *SupportGrantCreate) SetScope(v string) *SupportGrantCreate {
+	_c.mutation.SetScope(v)
+	return _c
 }
 
 // SetNillableScope sets the "scope" field if the given value is not nil.
-func (sgc *SupportGrantCreate) SetNillableScope(s *string) *SupportGrantCreate {
-	if s != nil {
-		sgc.SetScope(*s)
+func (_c *SupportGrantCreate) SetNillableScope(v *string) *SupportGrantCreate {
+	if v != nil {
+		_c.SetScope(*v)
 	}
-	return sgc
+	return _c
 }
 
 // SetWhitelistedIps sets the "whitelisted_ips" field.
-func (sgc *SupportGrantCreate) SetWhitelistedIps(s []string) *SupportGrantCreate {
-	sgc.mutation.SetWhitelistedIps(s)
-	return sgc
+func (_c *SupportGrantCreate) SetWhitelistedIps(v []string) *SupportGrantCreate {
+	_c.mutation.SetWhitelistedIps(v)
+	return _c
 }
 
 // SetCreatedAt sets the "created_at" field.
-func (sgc *SupportGrantCreate) SetCreatedAt(t time.Time) *SupportGrantCreate {
-	sgc.mutation.SetCreatedAt(t)
-	return sgc
+func (_c *SupportGrantCreate) SetCreatedAt(v time.Time) *SupportGrantCreate {
+	_c.mutation.SetCreatedAt(v)
+	return _c
 }
 
 // SetNillableCreatedAt sets the "created_at" field if the given value is not nil.
-func (sgc *SupportGrantCreate) SetNillableCreatedAt(t *time.Time) *SupportGrantCreate {
-	if t != nil {
-		sgc.SetCreatedAt(*t)
+func (_c *SupportGrantCreate) SetNillableCreatedAt(v *time.Time) *SupportGrantCreate {
+	if v != nil {
+		_c.SetCreatedAt(*v)
 	}
-	return sgc
+	return _c
 }
 
 // SetID sets the "id" field.
-func (sgc *SupportGrantCreate) SetID(u uuid.UUID) *SupportGrantCreate {
-	sgc.mutation.SetID(u)
-	return sgc
+func (_c *SupportGrantCreate) SetID(v uuid.UUID) *SupportGrantCreate {
+	_c.mutation.SetID(v)
+	return _c
 }
 
 // SetNillableID sets the "id" field if the given value is not nil.
-func (sgc *SupportGrantCreate) SetNillableID(u *uuid.UUID) *SupportGrantCreate {
-	if u != nil {
-		sgc.SetID(*u)
+func (_c *SupportGrantCreate) SetNillableID(v *uuid.UUID) *SupportGrantCreate {
+	if v != nil {
+		_c.SetID(*v)
 	}
-	return sgc
+	return _c
 }
 
 // Mutation returns the SupportGrantMutation object of the builder.
-func (sgc *SupportGrantCreate) Mutation() *SupportGrantMutation {
-	return sgc.mutation
+func (_c *SupportGrantCreate) Mutation() *SupportGrantMutation {
+	return _c.mutation
 }
 
 // Save creates the SupportGrant in the database.
-func (sgc *SupportGrantCreate) Save(ctx context.Context) (*SupportGrant, error) {
-	sgc.defaults()
-	return withHooks(ctx, sgc.sqlSave, sgc.mutation, sgc.hooks)
+func (_c *SupportGrantCreate) Save(ctx context.Context) (*SupportGrant, error) {
+	_c.defaults()
+	return withHooks(ctx, _c.sqlSave, _c.mutation, _c.hooks)
 }
 
 // SaveX calls Save and panics if Save returns an error.
-func (sgc *SupportGrantCreate) SaveX(ctx context.Context) *SupportGrant {
-	v, err := sgc.Save(ctx)
+func (_c *SupportGrantCreate) SaveX(ctx context.Context) *SupportGrant {
+	v, err := _c.Save(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -156,74 +156,74 @@ func (sgc *SupportGrantCreate) SaveX(ctx context.Context) *SupportGrant {
 }
 
 // Exec executes the query.
-func (sgc *SupportGrantCreate) Exec(ctx context.Context) error {
-	_, err := sgc.Save(ctx)
+func (_c *SupportGrantCreate) Exec(ctx context.Context) error {
+	_, err := _c.Save(ctx)
 	return err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (sgc *SupportGrantCreate) ExecX(ctx context.Context) {
-	if err := sgc.Exec(ctx); err != nil {
+func (_c *SupportGrantCreate) ExecX(ctx context.Context) {
+	if err := _c.Exec(ctx); err != nil {
 		panic(err)
 	}
 }
 
 // defaults sets the default values of the builder before save.
-func (sgc *SupportGrantCreate) defaults() {
-	if _, ok := sgc.mutation.IsUsed(); !ok {
+func (_c *SupportGrantCreate) defaults() {
+	if _, ok := _c.mutation.IsUsed(); !ok {
 		v := supportgrant.DefaultIsUsed
-		sgc.mutation.SetIsUsed(v)
+		_c.mutation.SetIsUsed(v)
 	}
-	if _, ok := sgc.mutation.Scope(); !ok {
+	if _, ok := _c.mutation.Scope(); !ok {
 		v := supportgrant.DefaultScope
-		sgc.mutation.SetScope(v)
+		_c.mutation.SetScope(v)
 	}
-	if _, ok := sgc.mutation.WhitelistedIps(); !ok {
+	if _, ok := _c.mutation.WhitelistedIps(); !ok {
 		v := supportgrant.DefaultWhitelistedIps
-		sgc.mutation.SetWhitelistedIps(v)
+		_c.mutation.SetWhitelistedIps(v)
 	}
-	if _, ok := sgc.mutation.CreatedAt(); !ok {
+	if _, ok := _c.mutation.CreatedAt(); !ok {
 		v := supportgrant.DefaultCreatedAt()
-		sgc.mutation.SetCreatedAt(v)
+		_c.mutation.SetCreatedAt(v)
 	}
-	if _, ok := sgc.mutation.ID(); !ok {
+	if _, ok := _c.mutation.ID(); !ok {
 		v := supportgrant.DefaultID()
-		sgc.mutation.SetID(v)
+		_c.mutation.SetID(v)
 	}
 }
 
 // check runs all checks and user-defined validators on the builder.
-func (sgc *SupportGrantCreate) check() error {
-	if _, ok := sgc.mutation.InstitutionID(); !ok {
+func (_c *SupportGrantCreate) check() error {
+	if _, ok := _c.mutation.InstitutionID(); !ok {
 		return &ValidationError{Name: "institution_id", err: errors.New(`ent: missing required field "SupportGrant.institution_id"`)}
 	}
-	if _, ok := sgc.mutation.GrantedByID(); !ok {
+	if _, ok := _c.mutation.GrantedByID(); !ok {
 		return &ValidationError{Name: "granted_by_id", err: errors.New(`ent: missing required field "SupportGrant.granted_by_id"`)}
 	}
-	if _, ok := sgc.mutation.TokenHash(); !ok {
+	if _, ok := _c.mutation.TokenHash(); !ok {
 		return &ValidationError{Name: "token_hash", err: errors.New(`ent: missing required field "SupportGrant.token_hash"`)}
 	}
-	if _, ok := sgc.mutation.ExpiresAt(); !ok {
+	if _, ok := _c.mutation.ExpiresAt(); !ok {
 		return &ValidationError{Name: "expires_at", err: errors.New(`ent: missing required field "SupportGrant.expires_at"`)}
 	}
-	if _, ok := sgc.mutation.IsUsed(); !ok {
+	if _, ok := _c.mutation.IsUsed(); !ok {
 		return &ValidationError{Name: "is_used", err: errors.New(`ent: missing required field "SupportGrant.is_used"`)}
 	}
-	if _, ok := sgc.mutation.Scope(); !ok {
+	if _, ok := _c.mutation.Scope(); !ok {
 		return &ValidationError{Name: "scope", err: errors.New(`ent: missing required field "SupportGrant.scope"`)}
 	}
-	if _, ok := sgc.mutation.CreatedAt(); !ok {
+	if _, ok := _c.mutation.CreatedAt(); !ok {
 		return &ValidationError{Name: "created_at", err: errors.New(`ent: missing required field "SupportGrant.created_at"`)}
 	}
 	return nil
 }
 
-func (sgc *SupportGrantCreate) sqlSave(ctx context.Context) (*SupportGrant, error) {
-	if err := sgc.check(); err != nil {
+func (_c *SupportGrantCreate) sqlSave(ctx context.Context) (*SupportGrant, error) {
+	if err := _c.check(); err != nil {
 		return nil, err
 	}
-	_node, _spec := sgc.createSpec()
-	if err := sqlgraph.CreateNode(ctx, sgc.driver, _spec); err != nil {
+	_node, _spec := _c.createSpec()
+	if err := sqlgraph.CreateNode(ctx, _c.driver, _spec); err != nil {
 		if sqlgraph.IsConstraintError(err) {
 			err = &ConstraintError{msg: err.Error(), wrap: err}
 		}
@@ -236,57 +236,57 @@ func (sgc *SupportGrantCreate) sqlSave(ctx context.Context) (*SupportGrant, erro
 			return nil, err
 		}
 	}
-	sgc.mutation.id = &_node.ID
-	sgc.mutation.done = true
+	_c.mutation.id = &_node.ID
+	_c.mutation.done = true
 	return _node, nil
 }
 
-func (sgc *SupportGrantCreate) createSpec() (*SupportGrant, *sqlgraph.CreateSpec) {
+func (_c *SupportGrantCreate) createSpec() (*SupportGrant, *sqlgraph.CreateSpec) {
 	var (
-		_node = &SupportGrant{config: sgc.config}
+		_node = &SupportGrant{config: _c.config}
 		_spec = sqlgraph.NewCreateSpec(supportgrant.Table, sqlgraph.NewFieldSpec(supportgrant.FieldID, field.TypeUUID))
 	)
-	if id, ok := sgc.mutation.ID(); ok {
+	if id, ok := _c.mutation.ID(); ok {
 		_node.ID = id
 		_spec.ID.Value = &id
 	}
-	if value, ok := sgc.mutation.InstitutionID(); ok {
+	if value, ok := _c.mutation.InstitutionID(); ok {
 		_spec.SetField(supportgrant.FieldInstitutionID, field.TypeUUID, value)
 		_node.InstitutionID = value
 	}
-	if value, ok := sgc.mutation.GrantedByID(); ok {
+	if value, ok := _c.mutation.GrantedByID(); ok {
 		_spec.SetField(supportgrant.FieldGrantedByID, field.TypeUUID, value)
 		_node.GrantedByID = value
 	}
-	if value, ok := sgc.mutation.UsedByID(); ok {
+	if value, ok := _c.mutation.UsedByID(); ok {
 		_spec.SetField(supportgrant.FieldUsedByID, field.TypeUUID, value)
 		_node.UsedByID = &value
 	}
-	if value, ok := sgc.mutation.TokenHash(); ok {
+	if value, ok := _c.mutation.TokenHash(); ok {
 		_spec.SetField(supportgrant.FieldTokenHash, field.TypeString, value)
 		_node.TokenHash = value
 	}
-	if value, ok := sgc.mutation.ExpiresAt(); ok {
+	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(supportgrant.FieldExpiresAt, field.TypeTime, value)
 		_node.ExpiresAt = value
 	}
-	if value, ok := sgc.mutation.IsUsed(); ok {
+	if value, ok := _c.mutation.IsUsed(); ok {
 		_spec.SetField(supportgrant.FieldIsUsed, field.TypeBool, value)
 		_node.IsUsed = value
 	}
-	if value, ok := sgc.mutation.UsedAt(); ok {
+	if value, ok := _c.mutation.UsedAt(); ok {
 		_spec.SetField(supportgrant.FieldUsedAt, field.TypeTime, value)
 		_node.UsedAt = &value
 	}
-	if value, ok := sgc.mutation.Scope(); ok {
+	if value, ok := _c.mutation.Scope(); ok {
 		_spec.SetField(supportgrant.FieldScope, field.TypeString, value)
 		_node.Scope = value
 	}
-	if value, ok := sgc.mutation.WhitelistedIps(); ok {
+	if value, ok := _c.mutation.WhitelistedIps(); ok {
 		_spec.SetField(supportgrant.FieldWhitelistedIps, field.TypeJSON, value)
 		_node.WhitelistedIps = value
 	}
-	if value, ok := sgc.mutation.CreatedAt(); ok {
+	if value, ok := _c.mutation.CreatedAt(); ok {
 		_spec.SetField(supportgrant.FieldCreatedAt, field.TypeTime, value)
 		_node.CreatedAt = value
 	}
@@ -301,16 +301,16 @@ type SupportGrantCreateBulk struct {
 }
 
 // Save creates the SupportGrant entities in the database.
-func (sgcb *SupportGrantCreateBulk) Save(ctx context.Context) ([]*SupportGrant, error) {
-	if sgcb.err != nil {
-		return nil, sgcb.err
+func (_c *SupportGrantCreateBulk) Save(ctx context.Context) ([]*SupportGrant, error) {
+	if _c.err != nil {
+		return nil, _c.err
 	}
-	specs := make([]*sqlgraph.CreateSpec, len(sgcb.builders))
-	nodes := make([]*SupportGrant, len(sgcb.builders))
-	mutators := make([]Mutator, len(sgcb.builders))
-	for i := range sgcb.builders {
+	specs := make([]*sqlgraph.CreateSpec, len(_c.builders))
+	nodes := make([]*SupportGrant, len(_c.builders))
+	mutators := make([]Mutator, len(_c.builders))
+	for i := range _c.builders {
 		func(i int, root context.Context) {
-			builder := sgcb.builders[i]
+			builder := _c.builders[i]
 			builder.defaults()
 			var mut Mutator = MutateFunc(func(ctx context.Context, m Mutation) (Value, error) {
 				mutation, ok := m.(*SupportGrantMutation)
@@ -324,11 +324,11 @@ func (sgcb *SupportGrantCreateBulk) Save(ctx context.Context) ([]*SupportGrant, 
 				var err error
 				nodes[i], specs[i] = builder.createSpec()
 				if i < len(mutators)-1 {
-					_, err = mutators[i+1].Mutate(root, sgcb.builders[i+1].mutation)
+					_, err = mutators[i+1].Mutate(root, _c.builders[i+1].mutation)
 				} else {
 					spec := &sqlgraph.BatchCreateSpec{Nodes: specs}
 					// Invoke the actual operation on the latest mutation in the chain.
-					if err = sqlgraph.BatchCreate(ctx, sgcb.driver, spec); err != nil {
+					if err = sqlgraph.BatchCreate(ctx, _c.driver, spec); err != nil {
 						if sqlgraph.IsConstraintError(err) {
 							err = &ConstraintError{msg: err.Error(), wrap: err}
 						}
@@ -348,7 +348,7 @@ func (sgcb *SupportGrantCreateBulk) Save(ctx context.Context) ([]*SupportGrant, 
 		}(i, ctx)
 	}
 	if len(mutators) > 0 {
-		if _, err := mutators[0].Mutate(ctx, sgcb.builders[0].mutation); err != nil {
+		if _, err := mutators[0].Mutate(ctx, _c.builders[0].mutation); err != nil {
 			return nil, err
 		}
 	}
@@ -356,8 +356,8 @@ func (sgcb *SupportGrantCreateBulk) Save(ctx context.Context) ([]*SupportGrant, 
 }
 
 // SaveX is like Save, but panics if an error occurs.
-func (sgcb *SupportGrantCreateBulk) SaveX(ctx context.Context) []*SupportGrant {
-	v, err := sgcb.Save(ctx)
+func (_c *SupportGrantCreateBulk) SaveX(ctx context.Context) []*SupportGrant {
+	v, err := _c.Save(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -365,14 +365,14 @@ func (sgcb *SupportGrantCreateBulk) SaveX(ctx context.Context) []*SupportGrant {
 }
 
 // Exec executes the query.
-func (sgcb *SupportGrantCreateBulk) Exec(ctx context.Context) error {
-	_, err := sgcb.Save(ctx)
+func (_c *SupportGrantCreateBulk) Exec(ctx context.Context) error {
+	_, err := _c.Save(ctx)
 	return err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (sgcb *SupportGrantCreateBulk) ExecX(ctx context.Context) {
-	if err := sgcb.Exec(ctx); err != nil {
+func (_c *SupportGrantCreateBulk) ExecX(ctx context.Context) {
+	if err := _c.Exec(ctx); err != nil {
 		panic(err)
 	}
 }

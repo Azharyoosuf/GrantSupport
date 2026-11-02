@@ -26,7 +26,7 @@ func BenchmarkJWTVerification(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := security.VerifyJWT(token)
 		if err != nil {
 			b.Fatalf("VerifyJWT failed: %v", err)
@@ -41,7 +41,7 @@ func BenchmarkJWTSigning(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := security.GenerateJWT("agent-123", "inst-456", "SUPPORT_AGENT", 1*time.Hour)
 		if err != nil {
 			b.Fatalf("GenerateJWT failed: %v", err)
@@ -75,7 +75,7 @@ func BenchmarkGrantCreation(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := engine.CreateSupportGrant(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 		if err != nil {
 			b.Fatalf("CreateSupportGrant failed: %v", err)
@@ -153,7 +153,7 @@ func BenchmarkRevocationCheck(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := store.IsTokenRevoked(ctx, instID, userID, 1)
 		if err != nil {
 			b.Fatalf("IsTokenRevoked failed: %v", err)

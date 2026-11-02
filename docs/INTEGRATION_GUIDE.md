@@ -119,54 +119,7 @@ curl -X POST http://localhost:8080/api/v1/auth/support/logout \
 
 ---
 
-### Step 5: Optional In-Band JIT Access Request & Approval Workflow
-
-GrantSupport allows support agents to initiate access requests that customer administrators review and approve in-band.
-
-#### 1. Agent Submits Access Request (`POST /api/v1/access-requests`):
-```bash
-curl -X POST http://localhost:8080/api/v1/access-requests \
-  -H "Authorization: Bearer <AGENT_JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "targetService": "billing-service",
-    "reason": "Investigating ticket #8492 - customer payment discrepancy",
-    "durationMinutes": 60,
-    "scope": "billing:read",
-    "whitelistedIps": ["198.51.100.4"]
-  }'
-```
-
-#### 2. Customer Admin Approves Access Request (`POST /api/v1/access-requests/{id}/approve`):
-```bash
-curl -X POST http://localhost:8080/api/v1/access-requests/01a004a0-7b2c-7b28-9e5d-e88103bc9505/approve \
-  -H "Authorization: Bearer <ADMIN_JWT>" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "durationMinutes": 45,
-    "scope": "billing:read"
-  }'
-```
-
-#### Response (`200 OK`):
-```json
-{
-  "success": true,
-  "requestId": "01a004a0-7b2c-7b28-9e5d-e88103bc9505",
-  "status": "APPROVED",
-  "grantId": "01a004a1-17c3-7b32-97fc-fa9214d394c0",
-  "rawToken": "550e8400-e29b-41d4-a716-446655440000_f92b4c10e82a4d70923f1b0a...",
-  "expiresAt": "2026-08-15T15:30:00Z"
-}
-```
-
-> [!IMPORTANT]
-> **Token Delivery Boundary & Operational Limitation**:
-> "Approval controls whether access may be granted. GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel."
-
----
-
-### Step 6: Customer Admin Immediate Revocation
+### Step 5: Customer Admin Immediate Revocation
 If a customer administrator wants to immediately revoke all active vendor access for their tenant:
 
 ```bash
@@ -215,6 +168,11 @@ func main() {
 	engine, err := grantsupport.NewEngine(
 		grantsupport.WithDB(db, "sqlite"),
 		grantsupport.WithAutoMigrate(true),
+		// Optional: pass a *redis.Client (Valkey/Redis) to automatically wire
+		// RedisLockStore, RedisRevocationStore, and RedisRateLimiter:
+		// grantsupport.WithRedis(redisClient),
+		// Optional: trust reverse-proxy CIDRs when serving engine.HTTPHandler():
+		// grantsupport.WithTrustedProxies([]string{"127.0.0.1", "::1", "172.28.0.10/32"}),
 	)
 	if err != nil {
 		log.Fatalf("Failed to initialize engine: %v", err)
@@ -251,9 +209,62 @@ func main() {
 }
 ```
 
+> **Note on Machine-to-Machine Request Signing**: The `BulletproofAuth` Ed25519 request-signing middleware was extracted into a standalone Go module at [`github.com/azharyoosuf/bulletproofauth`](https://github.com/azharyoosuf/bulletproofauth).
+
+### Available `grantsupport.Option` Functions
+* `WithDB(db *sql.DB, dialect string)` — Configures the primary SQL connection pool (`postgres`, `mysql`, `mariadb`, or `sqlite`).
+* `WithAutoMigrate(enabled bool)` — Runs embedded SQL schema migrations on `NewEngine` initialization.
+* `WithRedis(client *redis.Client)` — Wires `RedisLockStore`, `RedisRevocationStore`, and `RedisRateLimiter` using a caller-supplied Valkey/Redis client (individual store options below take precedence if also provided).
+* `WithLockStore(store ports.LockStore)` — Overrides the distributed lock store implementation.
+* `WithRevocationStore(store ports.RevocationStore)` — Overrides the token version revocation store implementation.
+* `WithRateLimiter(limiter ports.RateLimiterStore)` — Overrides the per-IP rate limiter store implementation.
+* `WithKeyPair(privatePEM, publicPEM string)` / `WithKeyID(kid string)` — Configures RS256 signing and verification keys (`kid` defaults to `"default-primary-key"`).
+* `WithWebhook(url, secret string)` — Enables HMAC-SHA256 webhook dispatching when both `url` and `secret` are non-empty.
+* `WithTrustedProxies(cidrs []string)` — Configures trusted reverse-proxy IPs/CIDRs for `security.ExtractClientIP` (defaults to `[]string{"127.0.0.1", "::1"}`).
+* `WithTLSEnabled(enabled bool)` / `WithHSTS(enabled bool, maxAge int, includeSubDomains, preload bool)` — Configures security headers (`Strict-Transport-Security`) emitted by `engine.HTTPHandler()`.
+
 ---
 
-## 4. Standardized Scope Policy & Matching (`pkg/scope`)
+## 4. Reverse Proxies, Docker Networks & `TRUSTED_PROXIES`
+
+To prevent untrusted clients from spoofing `X-Forwarded-For`, `X-Real-IP`, or `CF-Connecting-IP` headers to bypass per-IP rate limits or per-grant `whitelisted_ips`, GrantSupport does **not** use unconditional header-rewriting middleware. Instead, `security.ExtractClientIP` inspects forwarded headers **only** when the immediate TCP connection (`r.RemoteAddr`) originates from a peer listed in `TRUSTED_PROXIES` (default: `127.0.0.1,::1`, or `WithTrustedProxies` in embedded mode).
+
+When running behind **nginx**, **Traefik**, **Cloudflare**, **AWS ALB**, or on a **Docker Compose bridge network**, you must include the proxy's IP or CIDR in `TRUSTED_PROXIES`:
+
+```yaml
+services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "443:443"
+    networks:
+      app_net:
+        ipv4_address: 172.28.0.10
+
+  grantsupport:
+    build: .
+    environment:
+      PORT: "8080"
+      DATABASE_DIALECT: postgres
+      DATABASE_URL: postgresql://grantsupport:secretpassword@postgres:5432/grantsupport?sslmode=disable
+      TRUSTED_PROXIES: "127.0.0.1,::1,172.28.0.10/32"
+      # VALKEY_CACHE_URL is empty/unset by default (SQL-only mode). Set to enable Valkey:
+      VALKEY_CACHE_URL: "valkey://valkey:6379/0"
+    networks:
+      app_net:
+        ipv4_address: 172.28.0.20
+
+networks:
+  app_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
+```
+
+---
+
+## 5. Standardized Scope Policy & Matching (`pkg/scope`)
 
 GrantSupport carries the `scope` string through the RS256 JWT claim. Application-level domain authorization is enforced by your host application. To simplify hierarchical permission evaluation, GrantSupport provides the pure-Go `pkg/scope` utility:
 
@@ -277,7 +288,7 @@ scope.Matches("*", "any:arbitrary:scope")             // true
 
 ---
 
-## 5. Webhooks & Event Durability Boundaries
+## 6. Webhooks & Event Durability Boundaries
 
 GrantSupport emits signed HMAC-SHA256 webhooks for grant and session lifecycle transitions:
 * `grant.created`

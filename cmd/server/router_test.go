@@ -1,0 +1,1020 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"reflect"
+	"sort"
+	"strings"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
+	_ "modernc.org/sqlite"
+
+	"grantsupport/pkg/adapters/lock"
+	"grantsupport/pkg/adapters/ratelimit"
+	"grantsupport/pkg/adapters/revocation"
+	"grantsupport/pkg/cache"
+	"grantsupport/pkg/config"
+	pkgctx "grantsupport/pkg/context"
+	"grantsupport/pkg/controller"
+	"grantsupport/pkg/grantsupport"
+	"grantsupport/pkg/observability"
+	"grantsupport/pkg/repository"
+	"grantsupport/pkg/security"
+	"grantsupport/pkg/service"
+)
+
+type routerFactory struct {
+	name  string
+	setup func(t *testing.T) (http.Handler, func(ctx context.Context, instID, adminID uuid.UUID, whitelistedIPs []string) string)
+}
+
+func fullRouterFactories() []routerFactory {
+	return []routerFactory{
+		{
+			name: "Engine.HTTPHandler",
+			setup: func(t *testing.T) (http.Handler, func(ctx context.Context, instID, adminID uuid.UUID, whitelistedIPs []string) string) {
+				t.Helper()
+				dsn := fmt.Sprintf("file:engine_router_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+				db, err := sql.Open("sqlite", dsn)
+				if err != nil {
+					t.Fatalf("sql.Open failed: %v", err)
+				}
+				t.Cleanup(func() { _ = db.Close() })
+
+				eng, err := grantsupport.NewEngine(
+					grantsupport.WithDB(db, "sqlite"),
+					grantsupport.WithAutoMigrate(true),
+				)
+				if err != nil {
+					t.Fatalf("NewEngine failed: %v", err)
+				}
+				t.Cleanup(func() { _ = eng.Close() })
+
+				createGrant := func(ctx context.Context, instID, adminID uuid.UUID, whitelistedIPs []string) string {
+					tok, err := eng.CreateSupportGrant(ctx, instID, adminID, 30, "FULL_ACCESS", whitelistedIPs)
+					if err != nil {
+						t.Fatalf("CreateSupportGrant failed: %v", err)
+					}
+					return tok
+				}
+				return eng.HTTPHandler(), createGrant
+			},
+		},
+		{
+			name: "Server.Router",
+			setup: func(t *testing.T) (http.Handler, func(ctx context.Context, instID, adminID uuid.UUID, whitelistedIPs []string) string) {
+				t.Helper()
+				dsn := fmt.Sprintf("file:server_router_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+				db, err := sql.Open("sqlite", dsn)
+				if err != nil {
+					t.Fatalf("sql.Open failed: %v", err)
+				}
+				t.Cleanup(func() { _ = db.Close() })
+
+				baseRepo := repository.NewBaseRepositoryWithDB(db, "sqlite")
+				t.Cleanup(func() { _ = baseRepo.MasterClient.Close() })
+
+				if err := baseRepo.MasterClient.Schema.Create(context.Background()); err != nil {
+					t.Fatalf("Schema.Create failed: %v", err)
+				}
+				if err := repository.CreateCapabilityTables(context.Background(), db, "sqlite"); err != nil {
+					t.Fatalf("CreateCapabilityTables failed: %v", err)
+				}
+
+				lockStore := lock.NewSQLLockStore(db, "sqlite")
+				revStore := revocation.NewSQLRevocationStore(db, "sqlite")
+				rateLimiter := ratelimit.NewMemoryRateLimiter()
+
+				grantRepo := repository.NewSupportGrantRepository(baseRepo)
+				auditRepo := repository.NewSecurityAuditRepository(baseRepo)
+				auditRepo.SetLockStore(lockStore)
+
+				grantSvc := service.NewGrantSupportService(grantRepo, auditRepo)
+				grantSvc.SetRevocationStore(revStore)
+
+				grantCtrl := controller.NewSupportGrantController(grantSvc)
+				auditSvc := service.NewSecurityAuditService(auditRepo)
+				auditCtrl := controller.NewAuditController(auditSvc)
+				jwksCtrl := controller.NewJWKSController()
+				healthCtrl := controller.NewHealthController(grantsupport.Version, db, nil)
+
+				router := newServerRouter(grantCtrl, auditCtrl, jwksCtrl, healthCtrl, revStore, rateLimiter)
+				createGrant := func(ctx context.Context, instID, adminID uuid.UUID, whitelistedIPs []string) string {
+					tok, err := grantSvc.CreateSupportGrantScoped(ctx, instID, adminID, 30, "FULL_ACCESS", whitelistedIPs)
+					if err != nil {
+						t.Fatalf("CreateSupportGrantScoped failed: %v", err)
+					}
+					return tok
+				}
+				return router, createGrant
+			},
+		},
+	}
+}
+
+func TestClientIPSpoofingAndTrustedProxies_FullRouters(t *testing.T) {
+	if err := security.SetupTestRSAKeys(); err != nil {
+		t.Fatalf("SetupTestRSAKeys failed: %v", err)
+	}
+
+	prevCfg := config.AppConfig
+	t.Cleanup(func() {
+		config.AppConfig = prevCfg
+	})
+
+	for _, rf := range fullRouterFactories() {
+		t.Run(rf.name, func(t *testing.T) {
+			t.Run("a_untrusted_peer_cannot_bypass_whitelisted_ips_at_login", func(t *testing.T) {
+				config.AppConfig = &config.Config{
+					TrustedProxies: []string{"10.0.0.1"},
+				}
+				handler, createGrant := rf.setup(t)
+				ctx := context.Background()
+				instID := uuid.New()
+				adminID := uuid.New()
+				agentID := uuid.New()
+
+				token := createGrant(ctx, instID, adminID, []string{"198.51.100.10"})
+
+				spoofAttempts := []struct {
+					name    string
+					headers map[string]string
+				}{
+					{
+						name:    "X-Real-IP",
+						headers: map[string]string{"X-Real-IP": "198.51.100.10"},
+					},
+					{
+						name:    "X-Forwarded-For",
+						headers: map[string]string{"X-Forwarded-For": "198.51.100.10"},
+					},
+					{
+						name:    "CF-Connecting-IP",
+						headers: map[string]string{"CF-Connecting-IP": "198.51.100.10"},
+					},
+					{
+						name: "X-Real-IP_spoofing_trusted_proxy_plus_CF-Connecting-IP",
+						headers: map[string]string{
+							"X-Real-IP":        "10.0.0.1",
+							"CF-Connecting-IP": "198.51.100.10",
+						},
+					},
+				}
+
+				for _, attempt := range spoofAttempts {
+					body, _ := json.Marshal(map[string]string{
+						"token":   token,
+						"agentId": agentID.String(),
+					})
+					req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(body))
+					req.Header.Set("Content-Type", "application/json")
+					req.RemoteAddr = "203.0.113.99:54321" // Untrusted peer outside TrustedProxies
+					for k, v := range attempt.headers {
+						req.Header.Set(k, v)
+					}
+
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, req)
+
+					if rec.Code != http.StatusUnauthorized {
+						t.Fatalf("[%s] expected 401 Unauthorized when untrusted peer spoofs %v, got %d (body: %s)",
+							attempt.name, attempt.headers, rec.Code, rec.Body.String())
+					}
+				}
+			})
+
+			t.Run("b_untrusted_peer_cannot_bypass_per_ip_rate_limiting", func(t *testing.T) {
+				config.AppConfig = &config.Config{
+					TrustedProxies: []string{"10.0.0.1"},
+				}
+				handler, _ := rf.setup(t)
+				agentID := uuid.New()
+
+				// /api/v1/auth/support/login has a limit of 10 requests per 60s per IP.
+				// Send 10 requests from the same untrusted peer (203.0.113.88) while rotating spoofed headers on every request.
+				for i := 1; i <= 10; i++ {
+					body, _ := json.Marshal(map[string]string{
+						"token":   fmt.Sprintf("%s_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uuid.NewString()),
+						"agentId": agentID.String(),
+					})
+					req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(body))
+					req.Header.Set("Content-Type", "application/json")
+					req.RemoteAddr = fmt.Sprintf("203.0.113.88:%d", 50000+i)
+					req.Header.Set("X-Real-IP", fmt.Sprintf("192.0.2.%d", i))
+					req.Header.Set("X-Forwarded-For", fmt.Sprintf("192.0.2.%d", i))
+					req.Header.Set("CF-Connecting-IP", fmt.Sprintf("192.0.2.%d", i))
+
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, req)
+
+					if rec.Code == http.StatusTooManyRequests {
+						t.Fatalf("request %d should not be rate limited yet, got 429", i)
+					}
+				}
+
+				// 11th request from 203.0.113.88 with a brand-new spoofed IP must be rejected with 429 Too Many Requests.
+				body, _ := json.Marshal(map[string]string{
+					"token":   fmt.Sprintf("%s_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uuid.NewString()),
+					"agentId": agentID.String(),
+				})
+				req11 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(body))
+				req11.Header.Set("Content-Type", "application/json")
+				req11.RemoteAddr = "203.0.113.88:50099"
+				req11.Header.Set("X-Real-IP", "192.0.2.250")
+				req11.Header.Set("X-Forwarded-For", "192.0.2.250")
+				req11.Header.Set("CF-Connecting-IP", "192.0.2.250")
+
+				rec11 := httptest.NewRecorder()
+				handler.ServeHTTP(rec11, req11)
+
+				if rec11.Code != http.StatusTooManyRequests {
+					t.Fatalf("expected 429 Too Many Requests on 11th request from untrusted peer despite rotating spoofed IP headers, got %d (body: %s)",
+						rec11.Code, rec11.Body.String())
+				}
+			})
+
+			t.Run("c_trusted_proxy_headers_are_respected", func(t *testing.T) {
+				config.AppConfig = &config.Config{
+					TrustedProxies: []string{"10.0.0.0/24"},
+				}
+				handler, createGrant := rf.setup(t)
+				ctx := context.Background()
+				instID := uuid.New()
+				adminID := uuid.New()
+				agentID := uuid.New()
+
+				headerCases := []struct {
+					name      string
+					headerKey string
+					headerVal string
+				}{
+					{name: "X-Real-IP", headerKey: "X-Real-IP", headerVal: "198.51.100.10"},
+					{name: "X-Forwarded-For", headerKey: "X-Forwarded-For", headerVal: "198.51.100.10, 10.0.0.5"},
+					{name: "CF-Connecting-IP", headerKey: "CF-Connecting-IP", headerVal: "198.51.100.10"},
+				}
+
+				for _, tc := range headerCases {
+					tok := createGrant(ctx, instID, adminID, []string{"198.51.100.10"})
+
+					// First verify a non-whitelisted forwarded IP via trusted proxy is rejected
+					badBody, _ := json.Marshal(map[string]string{"token": tok, "agentId": agentID.String()})
+					badReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(badBody))
+					badReq.Header.Set("Content-Type", "application/json")
+					badReq.RemoteAddr = "10.0.0.5:443" // Inside TrustedProxies 10.0.0.0/24
+					badReq.Header.Set(tc.headerKey, "198.51.100.99")
+
+					badRec := httptest.NewRecorder()
+					handler.ServeHTTP(badRec, badReq)
+					if badRec.Code != http.StatusUnauthorized {
+						t.Fatalf("[%s] expected 401 for non-whitelisted forwarded IP from trusted proxy, got %d", tc.name, badRec.Code)
+					}
+
+					// Now verify the whitelisted forwarded IP via trusted proxy is accepted
+					okBody, _ := json.Marshal(map[string]string{"token": tok, "agentId": agentID.String()})
+					okReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(okBody))
+					okReq.Header.Set("Content-Type", "application/json")
+					okReq.RemoteAddr = "10.0.0.5:443" // Inside TrustedProxies 10.0.0.0/24
+					okReq.Header.Set(tc.headerKey, tc.headerVal)
+
+					okRec := httptest.NewRecorder()
+					handler.ServeHTTP(okRec, okReq)
+					if okRec.Code != http.StatusOK {
+						t.Fatalf("[%s] expected 200 OK for whitelisted forwarded IP from trusted proxy, got %d (body: %s)",
+							tc.name, okRec.Code, okRec.Body.String())
+					}
+				}
+
+				// Verify rate limiting behind a trusted proxy keys on the forwarded client IP, not the proxy IP:
+				// Exhaust 10 attempts for forwarded IP 198.51.100.20 via proxy 10.0.0.5, then verify 198.51.100.21 is still allowed.
+				for i := 1; i <= 10; i++ {
+					b, _ := json.Marshal(map[string]string{
+						"token":   fmt.Sprintf("%s_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uuid.NewString()),
+						"agentId": agentID.String(),
+					})
+					r := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(b))
+					r.Header.Set("Content-Type", "application/json")
+					r.RemoteAddr = "10.0.0.5:443"
+					r.Header.Set("X-Real-IP", "198.51.100.20")
+					rec := httptest.NewRecorder()
+					handler.ServeHTTP(rec, r)
+				}
+				// 11th request for 198.51.100.20 via trusted proxy -> 429
+				b11, _ := json.Marshal(map[string]string{
+					"token":   fmt.Sprintf("%s_0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef", uuid.NewString()),
+					"agentId": agentID.String(),
+				})
+				r11 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(b11))
+				r11.Header.Set("Content-Type", "application/json")
+				r11.RemoteAddr = "10.0.0.5:443"
+				r11.Header.Set("X-Real-IP", "198.51.100.20")
+				rec11 := httptest.NewRecorder()
+				handler.ServeHTTP(rec11, r11)
+				if rec11.Code != http.StatusTooManyRequests {
+					t.Fatalf("expected 429 for 11th request of forwarded IP 198.51.100.20 via trusted proxy, got %d", rec11.Code)
+				}
+
+				// Different forwarded IP 198.51.100.21 via the same trusted proxy 10.0.0.5 -> NOT 429
+				tokOther := createGrant(ctx, instID, adminID, []string{"198.51.100.21"})
+				bOther, _ := json.Marshal(map[string]string{"token": tokOther, "agentId": agentID.String()})
+				rOther := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(bOther))
+				rOther.Header.Set("Content-Type", "application/json")
+				rOther.RemoteAddr = "10.0.0.5:443"
+				rOther.Header.Set("X-Real-IP", "198.51.100.21")
+				recOther := httptest.NewRecorder()
+				handler.ServeHTTP(recOther, rOther)
+				if recOther.Code != http.StatusOK {
+					t.Fatalf("expected 200 OK for different forwarded IP 198.51.100.21 via same trusted proxy, got %d", recOther.Code)
+				}
+			})
+		})
+	}
+}
+
+func TestEmbeddedEngineParityWithServer(t *testing.T) {
+	if err := security.SetupTestRSAKeys(); err != nil {
+		t.Fatalf("SetupTestRSAKeys failed: %v", err)
+	}
+
+	t.Run("with_redis_wires_redis_stores_and_explicit_options_win", func(t *testing.T) {
+		valkeyURL := os.Getenv("VALKEY_CACHE_URL")
+		if valkeyURL == "" {
+			valkeyURL = "valkey://127.0.0.1:6379/0"
+		}
+		vc, err := cache.NewValkeyClient(valkeyURL)
+		if err != nil {
+			t.Fatalf("Failed to connect to live Valkey (%s): %v", valkeyURL, err)
+		}
+		t.Cleanup(func() { _ = vc.Close() })
+		rdb := vc.Client
+
+		ctx := context.Background()
+		dsn := fmt.Sprintf("file:engine_redis_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+		db, err := sql.Open("sqlite", dsn)
+		if err != nil {
+			t.Fatalf("sql.Open failed: %v", err)
+		}
+		t.Cleanup(func() { _ = db.Close() })
+
+		eng, err := grantsupport.NewEngine(
+			grantsupport.WithDB(db, "sqlite"),
+			grantsupport.WithRedis(rdb),
+			grantsupport.WithAutoMigrate(true),
+		)
+		if err != nil {
+			t.Fatalf("NewEngine failed: %v", err)
+		}
+		t.Cleanup(func() { _ = eng.Close() })
+
+		instID := uuid.New()
+		adminID := uuid.New()
+		agentID := uuid.New()
+
+		// 1. Prove RedisLockStore is used by Engine:
+		// Pre-hold "lock:audit:<instID>" in Valkey and call CreateSupportGrant with a 60ms context timeout.
+		// Because RedisLockStore sees the lock in Valkey, LogSecurityEvent times out and writes 0 audit events.
+		auditLockKey := fmt.Sprintf("lock:audit:%s", instID.String())
+		if err := rdb.Set(ctx, auditLockKey, "external-holder", 5*time.Second).Err(); err != nil {
+			t.Fatalf("failed to seed audit lock in Valkey: %v", err)
+		}
+		shortCtx, cancel := context.WithTimeout(ctx, 60*time.Millisecond)
+		_, _ = eng.CreateSupportGrant(shortCtx, instID, adminID, 30, "FULL_ACCESS", nil)
+		cancel()
+		_ = rdb.Del(ctx, auditLockKey).Val()
+
+		eventsWhileLocked, err := eng.GetAuditEvents(ctx, instID, 10, 0)
+		if err != nil {
+			t.Fatalf("GetAuditEvents failed: %v", err)
+		}
+		if len(eventsWhileLocked) != 0 {
+			t.Fatalf("expected 0 audit events while Valkey key %s was held (proving RedisLockStore is wired), got %d", auditLockKey, len(eventsWhileLocked))
+		}
+
+		// Now that the Valkey lock is released, CreateSupportGrant succeeds and writes the audit event:
+		rawToken, err := eng.CreateSupportGrant(ctx, instID, adminID, 30, "FULL_ACCESS", nil)
+		if err != nil {
+			t.Fatalf("CreateSupportGrant failed: %v", err)
+		}
+		eventsAfterUnlock, err := eng.GetAuditEvents(ctx, instID, 10, 0)
+		if err != nil || len(eventsAfterUnlock) != 1 {
+			t.Fatalf("expected 1 audit event after Valkey lock was released, got %d (err=%v)", len(eventsAfterUnlock), err)
+		}
+
+		// 2. Prove RedisRateLimiter is used by Engine.HTTPHandler():
+		handler := eng.HTTPHandler()
+		uniqueIP := fmt.Sprintf("198.51.100.%d", 100+(instID[0]%100))
+		rateKey := fmt.Sprintf("ratelimit:ip:%s:/api/v1/auth/support/login", uniqueIP)
+		_ = rdb.Del(ctx, rateKey).Val()
+		t.Cleanup(func() { _ = rdb.Del(ctx, rateKey).Val() })
+
+		loginBody, _ := json.Marshal(map[string]string{
+			"token":   rawToken,
+			"agentId": agentID.String(),
+		})
+		loginReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
+		loginReq.Header.Set("Content-Type", "application/json")
+		loginReq.RemoteAddr = uniqueIP + ":54321"
+		loginRec := httptest.NewRecorder()
+		handler.ServeHTTP(loginRec, loginReq)
+		if loginRec.Code != http.StatusOK {
+			t.Fatalf("login failed: %d %s", loginRec.Code, loginRec.Body.String())
+		}
+
+		rateVal, err := rdb.Get(ctx, rateKey).Result()
+		if err != nil || rateVal != "1" {
+			t.Fatalf("expected Valkey key %q to equal \"1\" (proving RedisRateLimiter is used), got val=%q err=%v", rateKey, rateVal, err)
+		}
+
+		// 3. Prove RedisRevocationStore is used by Engine:
+		revKey := fmt.Sprintf("cache:%s:user:security:%s", instID.String(), agentID.String())
+		_ = rdb.Del(ctx, revKey).Val()
+		t.Cleanup(func() { _ = rdb.Del(ctx, revKey).Val() })
+
+		if err := eng.RevokeSupportGrant(ctx, instID, adminID); err != nil {
+			t.Fatalf("RevokeSupportGrant failed: %v", err)
+		}
+		revVal, err := rdb.Get(ctx, revKey).Result()
+		if err != nil || revVal != "2" {
+			t.Fatalf("expected Valkey key %q to equal \"2\" (proving RedisRevocationStore is used), got val=%q err=%v", revKey, revVal, err)
+		}
+
+		// 4. Prove explicit store options win over WithRedis(rdb):
+		dsnExplicit := fmt.Sprintf("file:engine_explicit_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+		dbExplicit, err := sql.Open("sqlite", dsnExplicit)
+		if err != nil {
+			t.Fatalf("sql.Open failed: %v", err)
+		}
+		t.Cleanup(func() { _ = dbExplicit.Close() })
+
+		memLock := lock.NewMemoryLockStore()
+		sqlRev := revocation.NewSQLRevocationStore(dbExplicit, "sqlite")
+		memRate := ratelimit.NewMemoryRateLimiter()
+
+		engExplicit, err := grantsupport.NewEngine(
+			grantsupport.WithDB(dbExplicit, "sqlite"),
+			grantsupport.WithRedis(rdb),
+			grantsupport.WithLockStore(memLock),
+			grantsupport.WithRevocationStore(sqlRev),
+			grantsupport.WithRateLimiter(memRate),
+			grantsupport.WithAutoMigrate(true),
+		)
+		if err != nil {
+			t.Fatalf("NewEngine with explicit stores failed: %v", err)
+		}
+		t.Cleanup(func() { _ = engExplicit.Close() })
+
+		instID2 := uuid.New()
+		adminID2 := uuid.New()
+		agentID2 := uuid.New()
+		tok2, err := engExplicit.CreateSupportGrant(ctx, instID2, adminID2, 30, "FULL_ACCESS", nil)
+		if err != nil {
+			t.Fatalf("CreateSupportGrant failed: %v", err)
+		}
+		_, _, err = engExplicit.SupportLogin(ctx, tok2, agentID2)
+		if err != nil {
+			t.Fatalf("SupportLogin failed: %v", err)
+		}
+		if err := engExplicit.RevokeSupportGrant(ctx, instID2, adminID2); err != nil {
+			t.Fatalf("RevokeSupportGrant failed: %v", err)
+		}
+		revKey2 := fmt.Sprintf("cache:%s:user:security:%s", instID2.String(), agentID2.String())
+		if exists := rdb.Exists(ctx, revKey2).Val(); exists != 0 {
+			t.Fatalf("expected explicit SQLRevocationStore to win over WithRedis, but Valkey key %s was written", revKey2)
+		}
+	})
+
+	t.Run("security_headers_match_between_engine_and_server", func(t *testing.T) {
+		prevCfg := config.AppConfig
+		t.Cleanup(func() { config.AppConfig = prevCfg })
+		config.AppConfig = &config.Config{
+			TrustedProxies:        []string{"10.0.0.1"},
+			HSTSEnabled:           true,
+			HSTSMaxAge:            31536000,
+			HSTSIncludeSubdomains: true,
+		}
+
+		factories := fullRouterFactories()
+		engHandler, _ := factories[0].setup(t)
+		srvHandler, _ := factories[1].setup(t)
+
+		reqEng := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+		reqEng.RemoteAddr = "10.0.0.1:443"
+		reqEng.Header.Set("X-Forwarded-Proto", "https")
+		recEng := httptest.NewRecorder()
+		engHandler.ServeHTTP(recEng, reqEng)
+
+		reqSrv := httptest.NewRequest(http.MethodGet, "/health/live", nil)
+		reqSrv.RemoteAddr = "10.0.0.1:443"
+		reqSrv.Header.Set("X-Forwarded-Proto", "https")
+		recSrv := httptest.NewRecorder()
+		srvHandler.ServeHTTP(recSrv, reqSrv)
+
+		expectedHeaders := []string{
+			"X-Content-Type-Options",
+			"X-Frame-Options",
+			"Referrer-Policy",
+			"Strict-Transport-Security",
+		}
+		for _, hdr := range expectedHeaders {
+			engVal := recEng.Header().Get(hdr)
+			srvVal := recSrv.Header().Get(hdr)
+			if srvVal == "" {
+				t.Fatalf("server router missing expected security header %s", hdr)
+			}
+			if engVal != srvVal {
+				t.Fatalf("security header %s mismatch: Engine.HTTPHandler()=%q vs Server=%q", hdr, engVal, srvVal)
+			}
+		}
+	})
+
+	t.Run("webhook_dispatcher_starts_only_when_both_url_and_secret_are_set", func(t *testing.T) {
+		var hits atomic.Int32
+		hookSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits.Add(1)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer hookSrv.Close()
+
+		ctx := context.Background()
+		dsn1 := fmt.Sprintf("file:eng_hook_nosecret_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+		db1, err := sql.Open("sqlite", dsn1)
+		if err != nil {
+			t.Fatalf("sql.Open failed: %v", err)
+		}
+		defer db1.Close()
+
+		// URL without secret -> webhookDispatcher field on Engine must remain nil
+		engNoSecret, err := grantsupport.NewEngine(
+			grantsupport.WithDB(db1, "sqlite"),
+			grantsupport.WithWebhook(hookSrv.URL, ""),
+			grantsupport.WithAutoMigrate(true),
+		)
+		if err != nil {
+			t.Fatalf("NewEngine failed: %v", err)
+		}
+		defer engNoSecret.Close()
+
+		val := reflect.ValueOf(engNoSecret).Elem().FieldByName("webhookDispatcher")
+		if !val.IsNil() {
+			t.Fatalf("expected Engine.webhookDispatcher to be nil when WebhookSecret is empty, but it was initialized")
+		}
+
+		// URL + secret -> webhookDispatcher is initialized and delivers event
+		dsn2 := fmt.Sprintf("file:eng_hook_withsecret_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+		db2, err := sql.Open("sqlite", dsn2)
+		if err != nil {
+			t.Fatalf("sql.Open failed: %v", err)
+		}
+		defer db2.Close()
+
+		engWithSecret, err := grantsupport.NewEngine(
+			grantsupport.WithDB(db2, "sqlite"),
+			grantsupport.WithWebhook(hookSrv.URL, "test-hmac-secret"),
+			grantsupport.WithAutoMigrate(true),
+		)
+		if err != nil {
+			t.Fatalf("NewEngine failed: %v", err)
+		}
+		_, err = engWithSecret.CreateSupportGrant(ctx, uuid.New(), uuid.New(), 30, "FULL_ACCESS", nil)
+		if err != nil {
+			t.Fatalf("CreateSupportGrant failed: %v", err)
+		}
+		_ = engWithSecret.Close()
+
+		if hits.Load() == 0 {
+			t.Fatalf("expected webhook to be delivered when both URL and secret are configured")
+		}
+	})
+
+	t.Run("route_table_parity_between_engine_and_server", func(t *testing.T) {
+		factories := fullRouterFactories()
+		engHandler, _ := factories[0].setup(t)
+		srvHandler, _ := factories[1].setup(t)
+
+		collectRoutes := func(h http.Handler) []string {
+			r, ok := h.(chi.Routes)
+			if !ok {
+				t.Fatalf("handler %T does not implement chi.Routes", h)
+			}
+			var routes []string
+			err := chi.Walk(r, func(method string, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+				routes = append(routes, fmt.Sprintf("%s %s", method, route))
+				return nil
+			})
+			if err != nil {
+				t.Fatalf("chi.Walk failed: %v", err)
+			}
+			sort.Strings(routes)
+			return routes
+		}
+
+		engRoutes := collectRoutes(engHandler)
+		srvRoutes := collectRoutes(srvHandler)
+
+		if !reflect.DeepEqual(engRoutes, srvRoutes) {
+			t.Fatalf("route table mismatch between Engine.HTTPHandler() and Server router:\nEngine: %v\nServer: %v", engRoutes, srvRoutes)
+		}
+	})
+}
+
+func TestValkeyCacheURLUnsetDoesNotDialLocalValkey(t *testing.T) {
+	prevCfg := config.AppConfig
+	prevEnv, hadEnv := os.LookupEnv("VALKEY_CACHE_URL")
+	t.Cleanup(func() {
+		config.AppConfig = prevCfg
+		if hadEnv {
+			_ = os.Setenv("VALKEY_CACHE_URL", prevEnv)
+		} else {
+			_ = os.Unsetenv("VALKEY_CACHE_URL")
+		}
+	})
+
+	_ = os.Unsetenv("VALKEY_CACHE_URL")
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig failed: %v", err)
+	}
+	if cfg.ValkeyCacheURL != "" {
+		t.Fatalf("expected cfg.ValkeyCacheURL to be empty when VALKEY_CACHE_URL is unset, got %q", cfg.ValkeyCacheURL)
+	}
+
+	dsn := fmt.Sprintf("file:server_no_valkey_%s?mode=memory&cache=shared&_pragma=foreign_keys(1)&_fk=1", uuid.NewString())
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		t.Fatalf("sql.Open failed: %v", err)
+	}
+	defer db.Close()
+
+	if err := repository.CreateCapabilityTables(context.Background(), db, "sqlite"); err != nil {
+		t.Fatalf("CreateCapabilityTables failed: %v", err)
+	}
+
+	_, _, _, redisClient := initCapabilityStores(cfg, db, "sqlite")
+	if redisClient != nil {
+		_ = redisClient.Close()
+		t.Fatalf("expected redisClient to be nil when VALKEY_CACHE_URL is unset, but server dialed 127.0.0.1:6379")
+	}
+
+	healthCtrl := controller.NewHealthController(grantsupport.Version, db, redisClient)
+	req := httptest.NewRequest(http.MethodGet, "/health/ready", nil)
+	rec := httptest.NewRecorder()
+	controller.CatchAsync(healthCtrl.Ready).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /health/ready, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var readyResp struct {
+		Mode   string `json:"mode"`
+		Valkey string `json:"valkey"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &readyResp); err != nil {
+		t.Fatalf("failed to decode /health/ready response: %v", err)
+	}
+	if readyResp.Mode != "sql-only" || readyResp.Valkey != "NOT_CONFIGURED" {
+		t.Fatalf("expected sql-only / NOT_CONFIGURED when VALKEY_CACHE_URL is unset, got mode=%q valkey=%q", readyResp.Mode, readyResp.Valkey)
+	}
+}
+
+func scrapeMetricInt(t *testing.T, handler http.Handler, series string) int64 {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+	req.RemoteAddr = "127.0.0.1:9090"
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK from /metrics, got %d", rec.Code)
+	}
+	prefix := series + " "
+	for _, line := range strings.Split(rec.Body.String(), "\n") {
+		if strings.HasPrefix(line, prefix) {
+			valStr := strings.TrimSpace(strings.TrimPrefix(line, prefix))
+			var v int64
+			if _, err := fmt.Sscanf(valStr, "%d", &v); err != nil {
+				t.Fatalf("failed to parse metric value from line %q: %v", line, err)
+			}
+			return v
+		}
+	}
+	return 0
+}
+
+func TestMetricsEndToEnd_ServerAndEngine(t *testing.T) {
+	if err := security.SetupTestRSAKeys(); err != nil {
+		t.Fatalf("SetupTestRSAKeys failed: %v", err)
+	}
+
+	for _, rf := range fullRouterFactories() {
+		rf := rf
+		t.Run(rf.name, func(t *testing.T) {
+			observability.DefaultRegistry = observability.NewMetricRegistry()
+
+			handler, _ := rf.setup(t)
+			instID := uuid.New()
+			adminID := uuid.New()
+			agentID := uuid.New()
+
+			adminJWT, err := security.GenerateJWT(adminID.String(), instID.String(), "ADMIN", 15*time.Minute)
+			if err != nil {
+				t.Fatalf("GenerateJWT failed: %v", err)
+			}
+
+			// Baseline before any operations
+			grantsBefore := scrapeMetricInt(t, handler, `grantsupport_grants_created_total`)
+			loginSuccessBefore := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="success"}`)
+			loginFailureBefore := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="failure"}`)
+			revocationsBefore := scrapeMetricInt(t, handler, `grantsupport_revocations_total{scope="tenant"}`)
+
+			// 1. Create 1 support grant -> assert exact delta of +1 on grantsupport_grants_created_total
+			grantBody, _ := json.Marshal(map[string]any{
+				"durationMinutes": 30,
+				"scope":           "READ_ONLY",
+			})
+			reqGrant := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/grant", bytes.NewReader(grantBody))
+			reqGrant.RemoteAddr = "198.51.100.20:12345"
+			reqGrant.Header.Set("Content-Type", "application/json")
+			reqGrant.Header.Set("Authorization", "Bearer "+adminJWT)
+			recGrant := httptest.NewRecorder()
+			handler.ServeHTTP(recGrant, reqGrant)
+			if recGrant.Code != http.StatusCreated {
+				t.Fatalf("expected 201 Created from /grant, got %d: %s", recGrant.Code, recGrant.Body.String())
+			}
+			var grantResp struct {
+				Token string `json:"token"`
+			}
+			if err := json.Unmarshal(recGrant.Body.Bytes(), &grantResp); err != nil || grantResp.Token == "" {
+				t.Fatalf("failed to decode grant token: %v", err)
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_grants_created_total`) - grantsBefore; got != 1 {
+				t.Fatalf("expected 1 grant creation to add exactly 1 to grantsupport_grants_created_total, got delta=%d", got)
+			}
+
+			// 2. One successful support login -> assert exact delta of +1 on success and 0 on failure
+			loginBody, _ := json.Marshal(map[string]string{
+				"token":   grantResp.Token,
+				"agentId": agentID.String(),
+			})
+			reqLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
+			reqLogin.RemoteAddr = "198.51.100.21:12345"
+			reqLogin.Header.Set("Content-Type", "application/json")
+			recLogin := httptest.NewRecorder()
+			handler.ServeHTTP(recLogin, reqLogin)
+			if recLogin.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK from /login, got %d: %s", recLogin.Code, recLogin.Body.String())
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="success"}`) - loginSuccessBefore; got != 1 {
+				t.Fatalf("expected 1 successful login to add exactly 1 to grantsupport_logins_total{status=\"success\"}, got delta=%d", got)
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="failure"}`) - loginFailureBefore; got != 0 {
+				t.Fatalf("expected 1 successful login to add 0 to grantsupport_logins_total{status=\"failure\"}, got delta=%d", got)
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_active_sessions`); got != 1 {
+				t.Fatalf("expected grantsupport_active_sessions == 1 while session is active, got %d", got)
+			}
+
+			// 3. One failed support login (reusing single-use token) -> assert exact delta of +1 on failure and 0 on success
+			loginSuccessBeforeFail := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="success"}`)
+			loginFailureBeforeFail := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="failure"}`)
+
+			reqFailedLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
+			reqFailedLogin.RemoteAddr = "198.51.100.22:12345"
+			reqFailedLogin.Header.Set("Content-Type", "application/json")
+			recFailedLogin := httptest.NewRecorder()
+			handler.ServeHTTP(recFailedLogin, reqFailedLogin)
+			if recFailedLogin.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401 from failed /login, got %d", recFailedLogin.Code)
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="failure"}`) - loginFailureBeforeFail; got != 1 {
+				t.Fatalf("expected 1 failed login to add exactly 1 to grantsupport_logins_total{status=\"failure\"}, got delta=%d", got)
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_logins_total{status="success"}`) - loginSuccessBeforeFail; got != 0 {
+				t.Fatalf("expected 1 failed login to add 0 to grantsupport_logins_total{status=\"success\"}, got delta=%d", got)
+			}
+
+			// 4. Auth failure (invalid JWT signature on protected endpoint) -> assert exact delta of +1
+			authFailBefore := scrapeMetricInt(t, handler, `grantsupport_auth_failures_total{reason="invalid_signature"}`)
+			reqBadAuth := httptest.NewRequest(http.MethodGet, "/api/v1/auth/support/sessions", nil)
+			reqBadAuth.RemoteAddr = "198.51.100.23:12345"
+			reqBadAuth.Header.Set("Authorization", "Bearer invalid.jwt.token")
+			recBadAuth := httptest.NewRecorder()
+			handler.ServeHTTP(recBadAuth, reqBadAuth)
+			if recBadAuth.Code != http.StatusUnauthorized {
+				t.Fatalf("expected 401 from invalid JWT, got %d", recBadAuth.Code)
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_auth_failures_total{reason="invalid_signature"}`) - authFailBefore; got != 1 {
+				t.Fatalf("expected 1 invalid JWT request to add exactly 1 to grantsupport_auth_failures_total{reason=\"invalid_signature\"}, got delta=%d", got)
+			}
+
+			// 5. Parameterized route call (/api/v1/auth/support/sessions/{grantId}) to verify low-cardinality route pattern
+			nonExistentGrantID := uuid.New()
+			reqDelSession := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/support/sessions/"+nonExistentGrantID.String(), nil)
+			reqDelSession.RemoteAddr = "198.51.100.20:12345"
+			reqDelSession.Header.Set("Authorization", "Bearer "+adminJWT)
+			recDelSession := httptest.NewRecorder()
+			handler.ServeHTTP(recDelSession, reqDelSession)
+			if recDelSession.Code != http.StatusNotFound {
+				t.Fatalf("expected 404 from DELETE /sessions/{grantId}, got %d", recDelSession.Code)
+			}
+
+			// 6. Revoke all support grants for the tenant -> assert exact delta of +1 on tenant revocations
+			reqRevoke := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/revoke", nil)
+			reqRevoke.RemoteAddr = "198.51.100.20:12345"
+			reqRevoke.Header.Set("Authorization", "Bearer "+adminJWT)
+			recRevoke := httptest.NewRecorder()
+			handler.ServeHTTP(recRevoke, reqRevoke)
+			if recRevoke.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK from /revoke, got %d: %s", recRevoke.Code, recRevoke.Body.String())
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_revocations_total{scope="tenant"}`) - revocationsBefore; got != 1 {
+				t.Fatalf("expected 1 revoke call to add exactly 1 to grantsupport_revocations_total{scope=\"tenant\"}, got delta=%d", got)
+			}
+
+			// 7. Rate-limit rejection on /api/v1/auth/support/login (11 requests from same IP -> 1 rate-limit rejection)
+			rlBefore := scrapeMetricInt(t, handler, `grantsupport_rate_limit_exceeded_total{route="/api/v1/auth/support/login"}`)
+			for i := 1; i <= 11; i++ {
+				reqRL := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(loginBody))
+				reqRL.RemoteAddr = "198.51.100.99:54321"
+				reqRL.Header.Set("Content-Type", "application/json")
+				recRL := httptest.NewRecorder()
+				handler.ServeHTTP(recRL, reqRL)
+				if i == 11 && recRL.Code != http.StatusTooManyRequests {
+					t.Fatalf("expected 429 on 11th request, got %d", recRL.Code)
+				}
+			}
+			if got := scrapeMetricInt(t, handler, `grantsupport_rate_limit_exceeded_total{route="/api/v1/auth/support/login"}`) - rlBefore; got != 1 {
+				t.Fatalf("expected 1 rate-limited request to add exactly 1 to grantsupport_rate_limit_exceeded_total, got delta=%d", got)
+			}
+
+			// 9. Scrape /metrics and assert all expected series are non-zero and low-cardinality
+			reqMetrics2 := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+			reqMetrics2.RemoteAddr = "127.0.0.1:9090"
+			recMetrics2 := httptest.NewRecorder()
+			handler.ServeHTTP(recMetrics2, reqMetrics2)
+			if recMetrics2.Code != http.StatusOK {
+				t.Fatalf("expected 200 OK from /metrics, got %d", recMetrics2.Code)
+			}
+			body := recMetrics2.Body.String()
+
+			expectedLines := []string{
+				`grantsupport_grants_created_total 1`,
+				`grantsupport_logins_total{status="success"} 1`,
+				`grantsupport_logins_total{status="failure"} 11`,
+				`grantsupport_auth_failures_total{reason="invalid_signature"} 1`,
+				`grantsupport_revocations_total{scope="tenant"} 1`,
+				`grantsupport_rate_limit_exceeded_total{route="/api/v1/auth/support/login"} 1`,
+				`grantsupport_active_sessions 0`,
+				`grantsupport_http_requests_total{route="/api/v1/auth/support/grant",status_code="201"} 1`,
+				`grantsupport_http_requests_total{route="/api/v1/auth/support/sessions/{grantId}",status_code="404"} 1`,
+				`grantsupport_http_request_duration_seconds_count{route="/api/v1/auth/support/grant"} 1`,
+			}
+			for _, exp := range expectedLines {
+				if !strings.Contains(body, exp) {
+					t.Errorf("expected /metrics output to contain %q, got:\n%s", exp, body)
+				}
+			}
+
+			// DB pool open connections gauge should be >= 1
+			if strings.Contains(body, "grantsupport_db_connections_open 0") {
+				t.Errorf("expected grantsupport_db_connections_open > 0 after DB queries, got 0 in:\n%s", body)
+			}
+
+			// Verify zero high-cardinality leakage (no raw UUIDs or client IPs)
+			forbiddenValues := []string{
+				instID.String(),
+				adminID.String(),
+				agentID.String(),
+				nonExistentGrantID.String(),
+				"198.51.100.",
+			}
+			for _, forbidden := range forbiddenValues {
+				if strings.Contains(body, forbidden) {
+					t.Errorf("high-cardinality value %q leaked into /metrics output:\n%s", forbidden, body)
+				}
+			}
+		})
+	}
+}
+
+func TestSupportLogin_AgentIDRequired_AndSessionIsolation(t *testing.T) {
+	if err := security.SetupTestRSAKeys(); err != nil {
+		t.Fatalf("SetupTestRSAKeys failed: %v", err)
+	}
+
+	for _, rf := range fullRouterFactories() {
+		rf := rf
+		t.Run(rf.name, func(t *testing.T) {
+			handler, createGrant := rf.setup(t)
+			ctx := context.Background()
+			instID := uuid.New()
+			adminID := uuid.New()
+
+			tok1 := createGrant(ctx, instID, adminID, nil)
+			tok2 := createGrant(ctx, instID, adminID, nil)
+
+			// 1. Missing, empty, invalid, or nil agentId must return 400 INVALID_INPUT (even if a TenantData context is present)
+			sharedContextUserID := uuid.New()
+			tenantCtx := pkgctx.WithTenant(context.Background(), &pkgctx.TenantData{
+				InstitutionID: instID,
+				UserID:        sharedContextUserID,
+				Role:          "SUPPORT_AGENT",
+			})
+
+			invalidPayloads := []map[string]string{
+				{"token": tok1},
+				{"token": tok1, "agentId": ""},
+				{"token": tok1, "agentId": "not-a-uuid"},
+				{"token": tok1, "agentId": uuid.Nil.String()},
+			}
+			for i, payload := range invalidPayloads {
+				raw, _ := json.Marshal(payload)
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(raw)).WithContext(tenantCtx)
+				req.RemoteAddr = fmt.Sprintf("198.51.100.%d:12345", 40+i)
+				req.Header.Set("Content-Type", "application/json")
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				if rec.Code != http.StatusBadRequest {
+					t.Fatalf("case %d: expected 400 Bad Request for invalid/missing agentId, got %d: %s", i, rec.Code, rec.Body.String())
+				}
+				var prob struct {
+					Title string `json:"title"`
+					Type  string `json:"type"`
+				}
+				if err := json.Unmarshal(rec.Body.Bytes(), &prob); err != nil {
+					t.Fatalf("case %d: failed to decode problem details: %v", i, err)
+				}
+				if prob.Title != "INVALID_INPUT" || prob.Type != "urn:grantsupport:error:invalid_input" {
+					t.Fatalf("case %d: expected INVALID_INPUT problem details, got title=%q type=%q", i, prob.Title, prob.Type)
+				}
+			}
+
+			// 2. Two agents log in with their own required agentIds (tok1 was not consumed by the rejected 400 requests above):
+			agent1ID := uuid.New()
+			agent2ID := uuid.New()
+
+			body1, _ := json.Marshal(map[string]string{"token": tok1, "agentId": agent1ID.String()})
+			req1 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(body1))
+			req1.RemoteAddr = "198.51.100.31:12345"
+			req1.Header.Set("Content-Type", "application/json")
+			rec1 := httptest.NewRecorder()
+			handler.ServeHTTP(rec1, req1)
+
+			body2, _ := json.Marshal(map[string]string{"token": tok2, "agentId": agent2ID.String()})
+			req2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/login", bytes.NewReader(body2))
+			req2.RemoteAddr = "198.51.100.32:12345"
+			req2.Header.Set("Content-Type", "application/json")
+			rec2 := httptest.NewRecorder()
+			handler.ServeHTTP(rec2, req2)
+
+			if rec1.Code != http.StatusOK || rec2.Code != http.StatusOK {
+				t.Fatalf("login with explicit agentId failed: agent1=%d (%s), agent2=%d (%s)",
+					rec1.Code, strings.TrimSpace(rec1.Body.String()),
+					rec2.Code, strings.TrimSpace(rec2.Body.String()))
+			}
+
+			var resp1, resp2 struct {
+				AccessToken string `json:"access_token"`
+			}
+			_ = json.Unmarshal(rec1.Body.Bytes(), &resp1)
+			_ = json.Unmarshal(rec2.Body.Bytes(), &resp2)
+
+			// Agent 1 logs out:
+			reqLogout1 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/logout", nil)
+			reqLogout1.RemoteAddr = "198.51.100.31:12345"
+			reqLogout1.Header.Set("Authorization", "Bearer "+resp1.AccessToken)
+			recLogout1 := httptest.NewRecorder()
+			handler.ServeHTTP(recLogout1, reqLogout1)
+			if recLogout1.Code != http.StatusOK {
+				t.Fatalf("Agent 1 logout failed: %d %s", recLogout1.Code, recLogout1.Body.String())
+			}
+
+			// Agent 1's token is now revoked (401):
+			reqAgent1Again := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/logout", nil)
+			reqAgent1Again.RemoteAddr = "198.51.100.31:12345"
+			reqAgent1Again.Header.Set("Authorization", "Bearer "+resp1.AccessToken)
+			recAgent1Again := httptest.NewRecorder()
+			handler.ServeHTTP(recAgent1Again, reqAgent1Again)
+			if recAgent1Again.Code != http.StatusUnauthorized {
+				t.Fatalf("expected Agent 1 token to be 401 after logout, got %d", recAgent1Again.Code)
+			}
+
+			// Agent 2's session remains valid (200 OK):
+			reqAgent2 := httptest.NewRequest(http.MethodPost, "/api/v1/auth/support/logout", nil)
+			reqAgent2.RemoteAddr = "198.51.100.32:12345"
+			reqAgent2.Header.Set("Authorization", "Bearer "+resp2.AccessToken)
+			recAgent2 := httptest.NewRecorder()
+			handler.ServeHTTP(recAgent2, reqAgent2)
+			if recAgent2.Code != http.StatusOK {
+				t.Fatalf("expected Agent 2 session to remain valid after Agent 1 logout, got %d: %s", recAgent2.Code, strings.TrimSpace(recAgent2.Body.String()))
+			}
+		})
+	}
+}

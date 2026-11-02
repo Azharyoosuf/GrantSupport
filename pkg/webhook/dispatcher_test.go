@@ -185,7 +185,9 @@ func TestGrantOperationIsolationFromWebhookFailure(t *testing.T) {
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	lockStore := lock.NewMemoryLockStore()
 
-	svc := service.NewGrantSupportService(supportGrantRepo, auditRepo, lockStore)
+	auditRepo.SetLockStore(lockStore)
+
+	svc := service.NewGrantSupportService(supportGrantRepo, auditRepo)
 
 	// Configure a failing webhook endpoint (HTTP 500)
 	failingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -201,7 +203,7 @@ func TestGrantOperationIsolationFromWebhookFailure(t *testing.T) {
 	agentID := uuid.New()
 
 	// 1. CreateSupportGrant must succeed despite failing webhook
-	rawToken, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+	rawToken, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 	if err != nil {
 		t.Fatalf("CreateSupportGrant failed when webhook endpoint is 500: %v", err)
 	}

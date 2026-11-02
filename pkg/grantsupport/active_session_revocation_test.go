@@ -427,14 +427,16 @@ func TestRevocation_SQLFallbackBackend(t *testing.T) {
 	auditRepo := repository.NewSecurityAuditRepository(baseRepo)
 	lockStore := lock.NewMemoryLockStore()
 
-	svc := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+	auditRepo.SetLockStore(lockStore)
+
+	svc := service.NewGrantSupportService(grantRepo, auditRepo)
 	svc.SetRevocationStore(sqlRevStore)
 
 	instID := uuid.New()
 	adminID := uuid.New()
 	agentID := uuid.New()
 
-	rawToken, err := svc.CreateSupportGrant(ctx, instID, adminID, 60)
+	rawToken, err := svc.CreateSupportGrantScoped(ctx, instID, adminID, 60, "FULL_ACCESS", nil)
 	if err != nil {
 		t.Fatalf("CreateSupportGrant failed: %v", err)
 	}

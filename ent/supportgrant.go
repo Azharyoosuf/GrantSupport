@@ -68,7 +68,7 @@ func (*SupportGrant) scanValues(columns []string) ([]any, error) {
 
 // assignValues assigns the values that were returned from sql.Rows (after scanning)
 // to the SupportGrant fields.
-func (sg *SupportGrant) assignValues(columns []string, values []any) error {
+func (_m *SupportGrant) assignValues(columns []string, values []any) error {
 	if m, n := len(values), len(columns); m < n {
 		return fmt.Errorf("mismatch number of scan values: %d != %d", m, n)
 	}
@@ -78,63 +78,63 @@ func (sg *SupportGrant) assignValues(columns []string, values []any) error {
 			if value, ok := values[i].(*uuid.UUID); !ok {
 				return fmt.Errorf("unexpected type %T for field id", values[i])
 			} else if value != nil {
-				sg.ID = *value
+				_m.ID = *value
 			}
 		case supportgrant.FieldInstitutionID:
 			if value, ok := values[i].(*uuid.UUID); !ok {
 				return fmt.Errorf("unexpected type %T for field institution_id", values[i])
 			} else if value != nil {
-				sg.InstitutionID = *value
+				_m.InstitutionID = *value
 			}
 		case supportgrant.FieldGrantedByID:
 			if value, ok := values[i].(*uuid.UUID); !ok {
 				return fmt.Errorf("unexpected type %T for field granted_by_id", values[i])
 			} else if value != nil {
-				sg.GrantedByID = *value
+				_m.GrantedByID = *value
 			}
 		case supportgrant.FieldUsedByID:
 			if value, ok := values[i].(*sql.NullScanner); !ok {
 				return fmt.Errorf("unexpected type %T for field used_by_id", values[i])
 			} else if value.Valid {
-				sg.UsedByID = new(uuid.UUID)
-				*sg.UsedByID = *value.S.(*uuid.UUID)
+				_m.UsedByID = new(uuid.UUID)
+				*_m.UsedByID = *value.S.(*uuid.UUID)
 			}
 		case supportgrant.FieldTokenHash:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field token_hash", values[i])
 			} else if value.Valid {
-				sg.TokenHash = value.String
+				_m.TokenHash = value.String
 			}
 		case supportgrant.FieldExpiresAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field expires_at", values[i])
 			} else if value.Valid {
-				sg.ExpiresAt = value.Time
+				_m.ExpiresAt = value.Time
 			}
 		case supportgrant.FieldIsUsed:
 			if value, ok := values[i].(*sql.NullBool); !ok {
 				return fmt.Errorf("unexpected type %T for field is_used", values[i])
 			} else if value.Valid {
-				sg.IsUsed = value.Bool
+				_m.IsUsed = value.Bool
 			}
 		case supportgrant.FieldUsedAt:
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field used_at", values[i])
 			} else if value.Valid {
-				sg.UsedAt = new(time.Time)
-				*sg.UsedAt = value.Time
+				_m.UsedAt = new(time.Time)
+				*_m.UsedAt = value.Time
 			}
 		case supportgrant.FieldScope:
 			if value, ok := values[i].(*sql.NullString); !ok {
 				return fmt.Errorf("unexpected type %T for field scope", values[i])
 			} else if value.Valid {
-				sg.Scope = value.String
+				_m.Scope = value.String
 			}
 		case supportgrant.FieldWhitelistedIps:
 			if value, ok := values[i].(*[]byte); !ok {
 				return fmt.Errorf("unexpected type %T for field whitelisted_ips", values[i])
 			} else if value != nil && len(*value) > 0 {
-				if err := json.Unmarshal(*value, &sg.WhitelistedIps); err != nil {
+				if err := json.Unmarshal(*value, &_m.WhitelistedIps); err != nil {
 					return fmt.Errorf("unmarshal field whitelisted_ips: %w", err)
 				}
 			}
@@ -142,10 +142,10 @@ func (sg *SupportGrant) assignValues(columns []string, values []any) error {
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field created_at", values[i])
 			} else if value.Valid {
-				sg.CreatedAt = value.Time
+				_m.CreatedAt = value.Time
 			}
 		default:
-			sg.selectValues.Set(columns[i], values[i])
+			_m.selectValues.Set(columns[i], values[i])
 		}
 	}
 	return nil
@@ -153,66 +153,66 @@ func (sg *SupportGrant) assignValues(columns []string, values []any) error {
 
 // Value returns the ent.Value that was dynamically selected and assigned to the SupportGrant.
 // This includes values selected through modifiers, order, etc.
-func (sg *SupportGrant) Value(name string) (ent.Value, error) {
-	return sg.selectValues.Get(name)
+func (_m *SupportGrant) Value(name string) (ent.Value, error) {
+	return _m.selectValues.Get(name)
 }
 
 // Update returns a builder for updating this SupportGrant.
 // Note that you need to call SupportGrant.Unwrap() before calling this method if this SupportGrant
 // was returned from a transaction, and the transaction was committed or rolled back.
-func (sg *SupportGrant) Update() *SupportGrantUpdateOne {
-	return NewSupportGrantClient(sg.config).UpdateOne(sg)
+func (_m *SupportGrant) Update() *SupportGrantUpdateOne {
+	return NewSupportGrantClient(_m.config).UpdateOne(_m)
 }
 
 // Unwrap unwraps the SupportGrant entity that was returned from a transaction after it was closed,
 // so that all future queries will be executed through the driver which created the transaction.
-func (sg *SupportGrant) Unwrap() *SupportGrant {
-	_tx, ok := sg.config.driver.(*txDriver)
+func (_m *SupportGrant) Unwrap() *SupportGrant {
+	_tx, ok := _m.config.driver.(*txDriver)
 	if !ok {
 		panic("ent: SupportGrant is not a transactional entity")
 	}
-	sg.config.driver = _tx.drv
-	return sg
+	_m.config.driver = _tx.drv
+	return _m
 }
 
 // String implements the fmt.Stringer.
-func (sg *SupportGrant) String() string {
+func (_m *SupportGrant) String() string {
 	var builder strings.Builder
 	builder.WriteString("SupportGrant(")
-	builder.WriteString(fmt.Sprintf("id=%v, ", sg.ID))
+	builder.WriteString(fmt.Sprintf("id=%v, ", _m.ID))
 	builder.WriteString("institution_id=")
-	builder.WriteString(fmt.Sprintf("%v", sg.InstitutionID))
+	builder.WriteString(fmt.Sprintf("%v", _m.InstitutionID))
 	builder.WriteString(", ")
 	builder.WriteString("granted_by_id=")
-	builder.WriteString(fmt.Sprintf("%v", sg.GrantedByID))
+	builder.WriteString(fmt.Sprintf("%v", _m.GrantedByID))
 	builder.WriteString(", ")
-	if v := sg.UsedByID; v != nil {
+	if v := _m.UsedByID; v != nil {
 		builder.WriteString("used_by_id=")
 		builder.WriteString(fmt.Sprintf("%v", *v))
 	}
 	builder.WriteString(", ")
 	builder.WriteString("token_hash=")
-	builder.WriteString(sg.TokenHash)
+	builder.WriteString(_m.TokenHash)
 	builder.WriteString(", ")
 	builder.WriteString("expires_at=")
-	builder.WriteString(sg.ExpiresAt.Format(time.ANSIC))
+	builder.WriteString(_m.ExpiresAt.Format(time.ANSIC))
 	builder.WriteString(", ")
 	builder.WriteString("is_used=")
-	builder.WriteString(fmt.Sprintf("%v", sg.IsUsed))
+	builder.WriteString(fmt.Sprintf("%v", _m.IsUsed))
 	builder.WriteString(", ")
-	if v := sg.UsedAt; v != nil {
+	if v := _m.UsedAt; v != nil {
 		builder.WriteString("used_at=")
 		builder.WriteString(v.Format(time.ANSIC))
 	}
 	builder.WriteString(", ")
 	builder.WriteString("scope=")
-	builder.WriteString(sg.Scope)
+	builder.WriteString(_m.Scope)
 	builder.WriteString(", ")
 	builder.WriteString("whitelisted_ips=")
-	builder.WriteString(fmt.Sprintf("%v", sg.WhitelistedIps))
+	builder.WriteString(fmt.Sprintf("%v", _m.WhitelistedIps))
 	builder.WriteString(", ")
 	builder.WriteString("created_at=")
-	builder.WriteString(sg.CreatedAt.Format(time.ANSIC))
+	builder.WriteString(_m.CreatedAt.Format(time.ANSIC))
 	builder.WriteByte(')')
 	return builder.String()
 }

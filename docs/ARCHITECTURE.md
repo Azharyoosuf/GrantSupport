@@ -63,13 +63,13 @@ GrantSupport operates in two primary deployment topologies:
 ### 2.3 Data Access Layer (`pkg/repository/`)
 * **`SupportGrantRepository`**: Typed CRUD operations over `gs_support_grants` table with strict multi-tenant `institution_id` filtering.
 * **`SecurityAuditRepository`**: Chained append-only audit event logging to `gs_audit_events` with SHA-256 hash chaining and transaction management.
-* **Database Drivers**: Reference support for PostgreSQL 16+ via `jackc/pgx/v5`, MySQL 8.4+ and MariaDB 11.4+ via standard Go relational drivers, and SQLite 3 via pure Go `modernc.org/sqlite`.
+* **Database Drivers**: Reference support for PostgreSQL 16+ via `jackc/pgx/v5`, MySQL 8.0+ and MariaDB 10.5+ via standard Go relational drivers, and SQLite 3 via pure Go `modernc.org/sqlite`.
 
 ### 2.4 Capability Adapters (`pkg/adapters/`)
 Implements capability interfaces defined in `pkg/ports/`:
 * **`LockStore`**: `RedisLockStore` (Redlock atomic `SETNX` + Lua release) and `SQLLockStore` (database-level transactional/advisory locking).
 * **`RevocationStore`**: `RedisRevocationStore` (Valkey key-value version cache) and `SQLRevocationStore` (table-backed version query).
-* **`RateLimiterStore`**: `RedisRateLimiter` (atomic Lua token bucket per client IP) and `MemoryRateLimiter` (in-memory sliding window).
+* **`RateLimiterStore`**: `RedisRateLimiter` (atomic fixed-window Lua counter `INCR` + `PEXPIRE` per client IP) and `MemoryRateLimiter` (in-memory per-IP token bucket).
 
 ---
 
@@ -111,61 +111,16 @@ Implements capability interfaces defined in `pkg/ports/`:
 
 ---
 
-## 4. Authentication Mechanisms
-
-### 4.1 Default: RS256 JWT Bearer Authentication
-Standard for the HTTP API:
-* **Asymmetric RS256 Signing**: Tokens are signed using a private RSA key (`JWT_PRIVATE_KEY`) and verified using the corresponding public key (`JWT_PUBLIC_KEY`).
-* **Active Revocation Verification**: The `NewAuthMiddleware` extracts `token_version`, `institution_id`, and `user_id` from JWT claims and queries the `RevocationStore`. If the current version in the store exceeds the JWT's version, the request is rejected with HTTP 401 `TOKEN_REVOKED`.
----
-
-### 3.2 Just-In-Time (JIT) Access Request & Customer Approval Lifecycle
-
-GrantSupport provides an optional, in-band request and approval state machine:
-
-```
-[Support Agent]                                                GrantSupport                                              [Customer Admin]
-       │                                                             │                                                          │
-       │── 1. POST /access-requests (reason, duration, scope) ──────►│                                                          │
-       │                                                             ├── 2. Persist in gs_access_requests (status='PENDING')    │
-       │                                                             ├── 3. Append 'access_request.created' audit event         │
-       │                                                             └── 4. Dispatch async webhook 'access_request.created'     │
-       │◄── 5. Return Created AccessRequest (201 Created) ───────────┤                                                          │
-       │                                                             │                                                          │
-       │                                                             │◄── 6. GET /access-requests (views pending requests) ─────│
-       │                                                             │                                                          │
-       │                                                             │◄── 7. POST /access-requests/{id}/approve ────────────────│
-       │                                                             │    (Check: approver_id != requester_id)                  │
-       │                                                             │    (BEGIN DB TRANSACTION)                                │
-       │                                                             │    ├── Atomic CAS: status='APPROVED', expires_at > now   │
-       │                                                             │    ├── Insert SupportGrant record (SHA-256 token hash)   │
-       │                                                             │    └── Append 'access_request.approved' audit event      │
-       │                                                             │    (COMMIT DB TRANSACTION)                               │
-       │                                                             │    └── Dispatch async webhook 'access_request.approved'  │
-       │                                                             │─── 8. Return rawToken once in HTTP response ────────────►│
-       │                                                             │       (Admin shares rawToken via secure channel)         │
-       │                                                             │                                                          │
-       │◄── 9. Agent receives token out-of-band / via ticket ────────┴──────────────────────────────────────────────────────────┘
-       │
-       │── 10. POST /auth/support/login (token, agentId) ───────────► [Same single-use redemption and JWT issuance]
-```
-
----
-
 ## 4. Authentication, Session Revocation & Key Security
 
-### 4.1 Inbound JWT Bearer Authentication (Standard REST API)
-* **Bearer Validation**: Validates RS256 signatures against public keys in `KeyManager` with `kid` tracking.
-* **Revocation Check**: Queries `RevocationStore.IsTokenRevoked(instID, userID, tokenVersion)` on every request.
+### 4.1 Inbound RS256 JWT Bearer Authentication & Revocation
+Standard for the HTTP API:
+* **Asymmetric RS256 Signing**: Tokens are signed using a private RSA key (`JWT_PRIVATE_KEY`) and verified against public keys in `KeyManager` (`JWT_PUBLIC_KEY`) with `kid` tracking.
+* **Active Revocation Verification**: `NewAuthMiddleware` extracts `token_version`, `institution_id`, and `user_id` from JWT claims and queries `RevocationStore.IsTokenRevoked(instID, userID, tokenVersion)` on every request. If the current version in the store exceeds the JWT's version, the request is rejected with HTTP 401 `TOKEN_REVOKED`.
 * **Fail-Closed Guard**: If the `RevocationStore` is nil or unreachable, the middleware rejects requests with HTTP 503 `REVOCATION_CHECK_UNAVAILABLE`.
 
-### 4.2 Opt-In: BulletproofAuth (5-Layer Ed25519 Request Signing)
-Available via `engine.BulletproofMiddleware(keyStore)` for Go embedders securing machine-to-machine integrations:
-1. **Layer 1**: Ed25519 asymmetric cryptographic signature over canonical request payload (`Method\nPath\nNonce\nExpiresAt\nBody`).
-2. **Layer 2**: Client-specified payload expiration (TTL <= 900s) with 30s clock skew window.
-3. **Layer 3**: Nonce replay attack protection via atomic cache store.
-4. **Layer 4**: Socket-level TCP / trusted proxy client IP binding.
-5. **Layer 5**: Multi-tenant context injection into request context.
+### 4.2 Companion Library: BulletproofAuth (Standalone Repository)
+The Ed25519 per-request HTTP signing and nonce replay protection middleware has been extracted into a standalone Go module: [`github.com/azharyoosuf/bulletproofauth`](https://github.com/azharyoosuf/bulletproofauth).
 
 ---
 
@@ -181,7 +136,7 @@ Event #2 ──► Hash_2 = SHA-256(Hash_1 + Event_2_Data)
 Event #3 ──► Hash_3 = SHA-256(Hash_2 + Event_3_Data)
 ```
 
-* **Sequential Binding**: Each event record stores `previous_hash` and `hash_chain`.
+* **Sequential Binding**: Each event record stores `hash_chain`, computed sequentially over the previous event's `hash_chain` and the current event's canonical payload (`SHA-256(prev_hash_chain || event_data)`).
 * **Tamper Verification**: `engine.VerifyAuditChain(ctx, institutionID)` recalculates all hashes chronologically. If any record was altered, deleted, or inserted out of order, verification fails.
 * **Concurrency Protection**: Per-tenant mutex striping ensures concurrent operations within the same tenant do not interleave hash calculations.
 

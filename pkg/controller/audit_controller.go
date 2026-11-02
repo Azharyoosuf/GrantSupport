@@ -1,11 +1,14 @@
 package controller
 
 import (
+	"errors"
+	"log/slog"
 	"net/http"
 	"strconv"
 
 	"github.com/google/uuid"
 	pkgctx "grantsupport/pkg/context"
+	"grantsupport/pkg/repository"
 	"grantsupport/pkg/service"
 )
 
@@ -102,12 +105,39 @@ func (c *AuditController) VerifyAuditChain(w http.ResponseWriter, r *http.Reques
 
 	valid, err := c.auditService.VerifyAuditChain(r.Context(), tenant.InstitutionID)
 	if err != nil {
-		return NewAppError(http.StatusInternalServerError, "AUDIT_VERIFICATION_FAILED", "Failed to verify audit ledger: "+err.Error())
+		if errors.Is(err, repository.ErrAuditChainIntegrityViolation) {
+			slog.Warn("Audit chain integrity violation detected",
+				slog.String("institution_id", tenant.InstitutionID.String()),
+				slog.String("error", err.Error()),
+			)
+			WriteJSON(w, http.StatusOK, map[string]any{
+				"success":        true,
+				"valid":          false,
+				"institution_id": tenant.InstitutionID,
+				"message":        "Audit log cryptographic hash chain integrity violation detected.",
+			})
+			return nil
+		}
+		slog.Error("Failed to verify audit ledger",
+			slog.String("institution_id", tenant.InstitutionID.String()),
+			slog.String("error", err.Error()),
+		)
+		return NewAppError(http.StatusInternalServerError, "AUDIT_VERIFICATION_FAILED", "Failed to verify audit ledger")
+	}
+
+	if !valid {
+		WriteJSON(w, http.StatusOK, map[string]any{
+			"success":        true,
+			"valid":          false,
+			"institution_id": tenant.InstitutionID,
+			"message":        "Audit log cryptographic hash chain integrity violation detected.",
+		})
+		return nil
 	}
 
 	WriteJSON(w, http.StatusOK, map[string]any{
 		"success":        true,
-		"valid":          valid,
+		"valid":          true,
 		"institution_id": tenant.InstitutionID,
 		"message":        "Audit log cryptographic hash chain is valid and unbroken.",
 	})

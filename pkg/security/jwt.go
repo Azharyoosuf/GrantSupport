@@ -184,7 +184,10 @@ func VerifyJWT(tokenString string) (*CustomClaims, error) {
 		return pubKey, nil
 	})
 
-	if err != nil || !token.Valid {
+	if err != nil {
+		return nil, fmt.Errorf("INVALID_JWT_TOKEN: %w", err)
+	}
+	if !token.Valid {
 		return nil, errors.New("INVALID_JWT_TOKEN")
 	}
 

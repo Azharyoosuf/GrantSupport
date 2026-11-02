@@ -1,12 +1,16 @@
 package controller
 
 import (
+	"context"
+	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"grantsupport/pkg/config"
 	pkgctx "grantsupport/pkg/context"
+	"grantsupport/pkg/observability"
+	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
 	"grantsupport/pkg/service"
 )
@@ -45,10 +49,12 @@ func (c *SupportGrantController) GrantSupport(w http.ResponseWriter, r *http.Req
 func (c *SupportGrantController) SupportLogin(w http.ResponseWriter, r *http.Request) error {
 	input, err := DecodeAndValidate[SupportLoginInput](r)
 	if err != nil {
+		observability.DefaultRegistry.IncLogins("failure")
 		return err
 	}
-	callerID, err := resolveCallerID(r, input.AgentID)
+	callerID, err := parseRequiredAgentID(input.AgentID)
 	if err != nil {
+		observability.DefaultRegistry.IncLogins("failure")
 		return err
 	}
 
@@ -62,7 +68,7 @@ func (c *SupportGrantController) SupportLogin(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return NewAppError(http.StatusUnauthorized, "SUPPORT_LOGIN_FAILED", "Invalid or expired support grant token")
 	}
-	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support agent authenticated successfully.", "institution_id": instID, "access_token": jwtToken, "accessToken": jwtToken, "data": map[string]any{"institution_id": instID, "access_token": jwtToken}})
+	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support agent authenticated successfully.", "institution_id": instID, "access_token": jwtToken})
 	return nil
 }
 
@@ -122,8 +128,19 @@ func (c *SupportGrantController) TerminateSession(w http.ResponseWriter, r *http
 		return NewAppError(http.StatusBadRequest, "INVALID_GRANT_ID", "grantId must be a valid UUID")
 	}
 	if err := c.grantService.TerminateSession(r.Context(), tenant.InstitutionID, tenant.UserID, grantID); err != nil {
+		if errors.Is(err, repository.ErrGrantNotFound) {
+			return NewAppError(http.StatusNotFound, "GRANT_NOT_FOUND", "Support grant session not found")
+		}
 		return NewAppError(http.StatusInternalServerError, "TERMINATE_FAILED", "Failed to terminate support session")
 	}
 	WriteJSON(w, http.StatusOK, map[string]any{"success": true, "message": "Support session terminated successfully."})
 	return nil
+}
+
+// RefreshMetrics refreshes active session and DB connection pool gauges on scrape.
+func (c *SupportGrantController) RefreshMetrics(ctx context.Context, reg *observability.MetricRegistry) {
+	if c == nil || c.grantService == nil {
+		return
+	}
+	c.grantService.RefreshMetrics(ctx, reg)
 }

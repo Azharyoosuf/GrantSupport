@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -14,6 +15,9 @@ import (
 	"grantsupport/pkg/ports"
 	"grantsupport/pkg/security"
 )
+
+// ErrAuditChainIntegrityViolation indicates that an audit event's stored hash chain does not match its expected cryptographic SHA-256 link.
+var ErrAuditChainIntegrityViolation = errors.New("audit chain integrity violation")
 
 type SecurityAuditRepository struct {
 	*BaseRepository
@@ -136,7 +140,7 @@ func (r *SecurityAuditRepository) logSecurityEventInternal(ctx context.Context, 
 
 	// Compute SHA-256 hash chain value using exact canonical timestamp
 	h := sha256.New()
-	h.Write([]byte(fmt.Sprintf("%s:%s:%s:%s:%s:%d", prevHash, institutionID.String(), actorID.String(), eventType, sanitizedDesc, now.UnixNano())))
+	h.Write(fmt.Appendf(nil, "%s:%s:%s:%s:%s:%d", prevHash, institutionID.String(), actorID.String(), eventType, sanitizedDesc, now.UnixNano()))
 	computedHashChain := hex.EncodeToString(h.Sum(nil))
 
 	event, err := builder.
@@ -176,11 +180,11 @@ func (r *SecurityAuditRepository) VerifyAuditChain(ctx context.Context, institut
 	for _, event := range events {
 		eventTime := event.CreatedAt.UTC().Truncate(time.Microsecond)
 		h := sha256.New()
-		h.Write([]byte(fmt.Sprintf("%s:%s:%s:%s:%s:%d", prevHash, event.InstitutionID.String(), event.ActorID.String(), event.EventType, event.Description, eventTime.UnixNano())))
+		h.Write(fmt.Appendf(nil, "%s:%s:%s:%s:%s:%d", prevHash, event.InstitutionID.String(), event.ActorID.String(), event.EventType, event.Description, eventTime.UnixNano()))
 		expectedHash := hex.EncodeToString(h.Sum(nil))
 
 		if event.HashChain != expectedHash {
-			return false, fmt.Errorf("audit chain integrity violation at event %s: expected %s, got %s", event.ID, expectedHash, event.HashChain)
+			return false, fmt.Errorf("%w at event %s: expected %s, got %s", ErrAuditChainIntegrityViolation, event.ID, expectedHash, event.HashChain)
 		}
 		prevHash = event.HashChain
 	}

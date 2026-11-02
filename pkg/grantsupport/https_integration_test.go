@@ -16,13 +16,13 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	_ "modernc.org/sqlite"
 
 	"grantsupport/pkg/adapters/lock"
 	"grantsupport/pkg/adapters/revocation"
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
-	"grantsupport/pkg/domain"
 	"grantsupport/pkg/middleware"
 	"grantsupport/pkg/repository"
 	"grantsupport/pkg/security"
@@ -72,7 +72,9 @@ func TestHTTPS_EndToEndWorkflow(t *testing.T) {
 	lockStore := lock.NewSQLLockStore(db, "sqlite")
 	revStore := revocation.NewSQLRevocationStore(db, "sqlite")
 
-	svc := service.NewGrantSupportService(grantRepo, auditRepo, lockStore)
+	auditRepo.SetLockStore(lockStore)
+
+	svc := service.NewGrantSupportService(grantRepo, auditRepo)
 	svc.SetRevocationStore(revStore)
 	ctrl := controller.NewSupportGrantController(svc)
 
@@ -116,9 +118,9 @@ func TestHTTPS_EndToEndWorkflow(t *testing.T) {
 		},
 	}
 
-	instID := domain.NewUUID()
-	adminID := domain.NewUUID()
-	agentID := domain.NewUUID()
+	instID := uuid.Must(uuid.NewV7())
+	adminID := uuid.Must(uuid.NewV7())
+	agentID := uuid.Must(uuid.NewV7())
 
 	adminToken, err := security.GenerateJWTWithVersion(adminID.String(), instID.String(), "ADMIN", "FULL_ACCESS", 1, 1*time.Hour)
 	if err != nil {

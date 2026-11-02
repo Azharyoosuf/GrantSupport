@@ -30,6 +30,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
 
   /health/live:
     get:
@@ -44,6 +46,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HealthResponse'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
 
   /health/ready:
     get:
@@ -58,6 +62,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ReadinessResponse'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
         '503':
           description: Primary SQL database or mandatory dependency is unreachable
           content:
@@ -78,6 +84,8 @@ paths:
             text/plain; version=0.0.4; charset=utf-8:
               schema:
                 type: string
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
 
   /.well-known/jwks.json:
     get:
@@ -98,6 +106,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/JWKSResponse'
+        '429':
+          $ref: '#/components/responses/RFC7807TooManyRequests'
         '503':
           $ref: '#/components/responses/RFC7807InternalError'
 
@@ -253,6 +263,8 @@ paths:
           $ref: '#/components/responses/RFC7807BadRequest'
         '401':
           $ref: '#/components/responses/RFC7807Unauthorized'
+        '404':
+          $ref: '#/components/responses/RFC7807NotFound'
         '500':
           $ref: '#/components/responses/RFC7807InternalError'
 
@@ -313,274 +325,34 @@ paths:
       summary: Verify Cryptographic Audit Chain
       description: >
         Called by a customer administrator to cryptographically verify the unbroken SHA-256 sequential hash chain of all historical audit events for their tenant.
+        Returns HTTP 200 with `valid: true` when the hash chain is intact, or HTTP 200 with `valid: false` when a hash chain integrity violation is detected.
+        Returns HTTP 500 only when an underlying database query failure prevents verification.
       security:
         - BearerAuth: []
       responses:
         '200':
-          description: Audit ledger verification result
+          description: "Audit ledger verification result (`valid: true` when intact, `valid: false` when chain integrity is broken)"
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/AuditVerifyResponse'
+              examples:
+                validChain:
+                  summary: Intact audit hash chain
+                  value:
+                    success: true
+                    valid: true
+                    institution_id: 550e8400-e29b-41d4-a716-446655440000
+                    message: Audit log cryptographic hash chain is valid and unbroken.
+                brokenChain:
+                  summary: Tampered or broken audit hash chain
+                  value:
+                    success: false
+                    valid: false
+                    institution_id: 550e8400-e29b-41d4-a716-446655440000
+                    message: Audit ledger hash chain integrity violation detected
         '401':
           $ref: '#/components/responses/RFC7807Unauthorized'
-        '500':
-          $ref: '#/components/responses/RFC7807InternalError'
-
-  /api/v1/access-requests:
-    post:
-      operationId: createAccessRequest
-      summary: Submit Delegated Support Access Request
-      description: >
-        Called by a vendor support agent to submit an in-band Just-In-Time access request to a customer organization.
-      security:
-        - BearerAuth: []
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/CreateAccessRequestPayload'
-      responses:
-        '201':
-          description: Access request created successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AccessRequest'
-        '400':
-          $ref: '#/components/responses/RFC7807BadRequest'
-        '401':
-          $ref: '#/components/responses/RFC7807Unauthorized'
-        '429':
-          $ref: '#/components/responses/RFC7807TooManyRequests'
-        '500':
-          $ref: '#/components/responses/RFC7807InternalError'
-    get:
-      operationId: listAccessRequests
-      summary: List Access Requests
-      description: >
-        Queries paginated access requests for the authenticated tenant. Support agents view only their own requests.
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: status
-          in: query
-          required: false
-          schema:
-            type: string
-            enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
-          description: Filter by request status.
-        - name: limit
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 20
-            maximum: 100
-        - name: offset
-          in: query
-          required: false
-          schema:
-            type: integer
-            default: 0
-      responses:
-        '200':
-          description: List of access requests
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ListAccessRequestsResponse'
-        '401':
-          $ref: '#/components/responses/RFC7807Unauthorized'
-        '500':
-          $ref: '#/components/responses/RFC7807InternalError'
-
-  /api/v1/access-requests/{id}:
-    get:
-      operationId: getAccessRequest
-      summary: Get Access Request Details
-      description: >
-        Retrieves detailed information for a specific access request with strict tenant isolation.
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Unique access request UUID.
-      responses:
-        '200':
-          description: Access request details
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/AccessRequest'
-        '401':
-          $ref: '#/components/responses/RFC7807Unauthorized'
-        '404':
-          description: Request not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '500':
-          $ref: '#/components/responses/RFC7807InternalError'
-
-  /api/v1/access-requests/{id}/approve:
-    post:
-      operationId: approveAccessRequest
-      summary: Approve Access Request & Issue One-Time Token
-      description: >
-        Called by a customer administrator to approve a pending access request. Atomically creates a single-use SupportGrant and returns the rawToken exactly once in the response. Self-approval is strictly forbidden.
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-          description: Unique access request UUID.
-      requestBody:
-        required: false
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ApproveAccessRequestPayload'
-      responses:
-        '200':
-          description: Access request approved and raw single-use token issued
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ApproveAccessRequestResponse'
-        '400':
-          $ref: '#/components/responses/RFC7807BadRequest'
-        '401':
-          $ref: '#/components/responses/RFC7807Unauthorized'
-        '403':
-          description: Self-approval forbidden
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '404':
-          description: Request not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '409':
-          description: Request already resolved
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '410':
-          description: Request expired
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '429':
-          $ref: '#/components/responses/RFC7807TooManyRequests'
-        '500':
-          $ref: '#/components/responses/RFC7807InternalError'
-
-  /api/v1/access-requests/{id}/reject:
-    post:
-      operationId: rejectAccessRequest
-      summary: Reject Access Request
-      description: >
-        Called by a customer administrator to deny a pending access request with an explanation.
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/RejectAccessRequestPayload'
-      responses:
-        '200':
-          description: Access request rejected successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StandardSuccessResponse'
-        '400':
-          $ref: '#/components/responses/RFC7807BadRequest'
-        '401':
-          $ref: '#/components/responses/RFC7807Unauthorized'
-        '404':
-          description: Request not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '409':
-          description: Request already resolved
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '500':
-          $ref: '#/components/responses/RFC7807InternalError'
-
-  /api/v1/access-requests/{id}/cancel:
-    post:
-      operationId: cancelAccessRequest
-      summary: Cancel Access Request
-      description: >
-        Called by the requesting agent or a customer administrator to cancel a pending access request.
-      security:
-        - BearerAuth: []
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: string
-            format: uuid
-      responses:
-        '200':
-          description: Access request cancelled successfully
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/StandardSuccessResponse'
-        '401':
-          $ref: '#/components/responses/RFC7807Unauthorized'
-        '403':
-          description: Unauthorized cancellation
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '404':
-          description: Request not found
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
-        '409':
-          description: Request already resolved
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/RFC7807ProblemDetails'
         '500':
           $ref: '#/components/responses/RFC7807InternalError'
 
@@ -604,7 +376,7 @@ components:
           example: GrantSupport Engine
         version:
           type: string
-          example: v0.1.0-beta.2
+          example: vX.Y.Z
       required:
         - status
         - service
@@ -627,7 +399,7 @@ components:
           example: sql-only
         version:
           type: string
-          example: v0.1.0-beta.2
+          example: vX.Y.Z
       required:
         - status
         - database
@@ -687,7 +459,7 @@ components:
           example: 60
         scope:
           type: string
-          maxLength: 100
+          maxLength: 64
           description: Host-application permission scope passed through to the JWT claims. GrantSupport does not enforce your domain rules; your application must interpret this claim.
           example: BILLING_READ_ONLY
         whitelistedIps:
@@ -730,7 +502,7 @@ components:
         agentId:
           type: string
           format: uuid
-          description: Unique identifier of the authenticated vendor support engineer claiming the session.
+          description: Required explicit UUID of the support agent claiming the delegation token.
           example: 7f4c935b-16d7-4f9e-a8f2-39c4a852b719
 
     SupportLoginResponse:
@@ -913,195 +685,6 @@ components:
           type: string
           example: Operation completed successfully.
 
-    AccessRequest:
-      type: object
-      required:
-        - id
-        - institutionId
-        - requesterId
-        - reason
-        - requestedDurationMinutes
-        - requestedScope
-        - status
-        - expiresAt
-        - createdAt
-      properties:
-        id:
-          type: string
-          format: uuid
-          example: 01a003f4-5678-7123-9abc-def012345678
-        institutionId:
-          type: string
-          format: uuid
-          example: 550e8400-e29b-41d4-a716-446655440000
-        requesterId:
-          type: string
-          format: uuid
-          example: 7f4c935b-16d7-4f9e-a8f2-39c4a852b719
-        targetService:
-          type: string
-          example: billing-service
-        reason:
-          type: string
-          example: Investigating invoice discrepancy on customer ticket #4829
-        requestedDurationMinutes:
-          type: integer
-          example: 60
-        approvedDurationMinutes:
-          type: integer
-          example: 45
-        requestedScope:
-          type: string
-          example: billing:read
-        approvedScope:
-          type: string
-          example: billing:read
-        requestedIps:
-          type: array
-          items:
-            type: string
-          example: ["198.51.100.4"]
-        approvedIps:
-          type: array
-          items:
-            type: string
-          example: ["198.51.100.4"]
-        status:
-          type: string
-          enum: [PENDING, APPROVED, REJECTED, CANCELLED, EXPIRED]
-          example: PENDING
-        expiresAt:
-          type: string
-          format: date-time
-          example: 2026-08-16T12:00:00Z
-        approvedById:
-          type: string
-          format: uuid
-        approvedAt:
-          type: string
-          format: date-time
-        rejectedById:
-          type: string
-          format: uuid
-        rejectionReason:
-          type: string
-        rejectedAt:
-          type: string
-          format: date-time
-        cancelledAt:
-          type: string
-          format: date-time
-        supportGrantId:
-          type: string
-          format: uuid
-        createdAt:
-          type: string
-          format: date-time
-          example: 2026-08-15T12:00:00Z
-
-    CreateAccessRequestPayload:
-      type: object
-      required:
-        - reason
-        - durationMinutes
-      properties:
-        targetService:
-          type: string
-          maxLength: 128
-          example: billing-service
-        reason:
-          type: string
-          minLength: 3
-          maxLength: 1000
-          example: Investigating invoice discrepancy on customer ticket #4829
-        durationMinutes:
-          type: integer
-          minimum: 1
-          maximum: 1440
-          example: 60
-        scope:
-          type: string
-          maxLength: 64
-          example: billing:read
-        whitelistedIps:
-          type: array
-          items:
-            type: string
-          example: ["198.51.100.4"]
-
-    ApproveAccessRequestPayload:
-      type: object
-      properties:
-        durationMinutes:
-          type: integer
-          minimum: 1
-          maximum: 1440
-          example: 45
-        scope:
-          type: string
-          maxLength: 64
-          example: billing:read
-        whitelistedIps:
-          type: array
-          items:
-            type: string
-          example: ["198.51.100.4"]
-
-    RejectAccessRequestPayload:
-      type: object
-      required:
-        - rejectionReason
-      properties:
-        rejectionReason:
-          type: string
-          minLength: 3
-          maxLength: 1000
-          example: Ticket #4829 has already been resolved by support engineering.
-
-    ApproveAccessRequestResponse:
-      type: object
-      required:
-        - success
-        - requestId
-        - status
-        - grantId
-        - rawToken
-        - expiresAt
-      properties:
-        success:
-          type: boolean
-          example: true
-        requestId:
-          type: string
-          format: uuid
-        status:
-          type: string
-          example: APPROVED
-        grantId:
-          type: string
-          format: uuid
-        rawToken:
-          type: string
-          description: Single-use high-entropy bearer token returned strictly once upon approval and never persisted unhashed.
-          example: 550e8400-e29b-41d4-a716-446655440000_f92b4c10e82a4d70923f1b0a...
-        expiresAt:
-          type: string
-          format: date-time
-
-    ListAccessRequestsResponse:
-      type: object
-      required:
-        - requests
-        - count
-      properties:
-        requests:
-          type: array
-          items:
-            $ref: '#/components/schemas/AccessRequest'
-        count:
-          type: integer
-          example: 1
-
     RFC7807ProblemDetails:
       type: object
       required:
@@ -1109,16 +692,17 @@ components:
         - title
         - status
         - detail
+        - instance
       properties:
         type:
           type: string
           format: uri
-          description: A URI reference that identifies the problem type.
-          example: https://grantsupport.io/errors/validation-failed
+          description: A URI reference (URN) that identifies the problem type.
+          example: urn:grantsupport:error:validation_error
         title:
           type: string
-          description: A short, human-readable summary of the problem type.
-          example: VALIDATION_FAILED
+          description: A short, machine-readable summary of the problem type.
+          example: VALIDATION_ERROR
         status:
           type: integer
           description: The HTTP status code generated by the origin server.
@@ -1126,30 +710,15 @@ components:
         detail:
           type: string
           description: A sanitized human-readable explanation specific to this occurrence of the problem.
-          example: The request payload failed schema validation constraints.
+          example: field 'DurationMinutes' failed validation rule 'gte'
         instance:
           type: string
-          description: A URI reference identifying the specific occurrence of the problem.
+          description: A URI reference identifying the specific request path of the problem.
           example: /api/v1/auth/support/grant
-        code:
-          type: string
-          description: Machine-readable application error code.
-          example: ERR_INVALID_INPUT
         correlation_id:
           type: string
-          description: Unique correlation identifier for tracing.
+          description: Optional correlation identifier echoed when X-Correlation-ID was present on the request.
           example: 01a003f4-5678-7123-9abc-def012345678
-        validation_errors:
-          type: array
-          items:
-            type: object
-            properties:
-              field:
-                type: string
-                example: durationMinutes
-              message:
-                type: string
-                example: durationMinutes must be at least 1
 
   responses:
     RFC7807BadRequest:
@@ -1161,6 +730,13 @@ components:
 
     RFC7807Unauthorized:
       description: Unauthorized (Invalid, expired, or revoked token)
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/RFC7807ProblemDetails'
+
+    RFC7807NotFound:
+      description: Not Found (Requested resource or session does not exist)
       content:
         application/problem+json:
           schema:

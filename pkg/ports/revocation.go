@@ -1,13 +1,6 @@
 package ports
 
-import (
-	"context"
-	"errors"
-)
-
-var (
-	ErrTokenRevoked = errors.New("TOKEN_REVOKED: Session or token version has been revoked")
-)
+import "context"
 
 // RevocationStore manages token and session invalidation state across nodes.
 type RevocationStore interface {

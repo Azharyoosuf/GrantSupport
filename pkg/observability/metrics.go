@@ -2,6 +2,7 @@ package observability
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -31,6 +32,9 @@ type MetricRegistry struct {
 
 	// Histograms: duration in seconds
 	requestDurations map[string]*histogram // key: route
+
+	// Optional callback invoked on each /metrics scrape to refresh gauges
+	scrapeRefresher func(ctx context.Context, r *MetricRegistry)
 }
 
 type histogram struct {
@@ -191,9 +195,32 @@ func (r *MetricRegistry) SetDBPoolStats(open, inUse int) {
 	atomic.StoreInt64(&r.dbConnectionsInUse, int64(inUse))
 }
 
+// SetScrapeRefresher registers a callback executed prior to rendering metrics on each scrape.
+func (r *MetricRegistry) SetScrapeRefresher(fn func(ctx context.Context, r *MetricRegistry)) {
+	r.mu.Lock()
+	r.scrapeRefresher = fn
+	r.mu.Unlock()
+}
+
 // Handler returns an http.HandlerFunc that renders metrics in standard Prometheus text exposition format.
 func (r *MetricRegistry) Handler() http.HandlerFunc {
+	return r.HandlerWithRefresher(nil)
+}
+
+// HandlerWithRefresher returns an http.HandlerFunc that refreshes gauges using refreshFn (or the registry's default refresher) on scrape before rendering metrics.
+func (r *MetricRegistry) HandlerWithRefresher(refreshFn func(ctx context.Context, r *MetricRegistry)) http.HandlerFunc {
 	return func(w http.ResponseWriter, req *http.Request) {
+		if refreshFn != nil {
+			refreshFn(req.Context(), r)
+		} else {
+			r.mu.RLock()
+			fn := r.scrapeRefresher
+			r.mu.RUnlock()
+			if fn != nil {
+				fn(req.Context(), r)
+			}
+		}
+
 		var buf bytes.Buffer
 
 		// 1. Grants Created
@@ -272,6 +299,23 @@ func (r *MetricRegistry) Handler() http.HandlerFunc {
 		for key, ptr := range r.httpRequestsTotal {
 			route, code := parseRouteAndCode(key)
 			buf.WriteString(fmt.Sprintf("grantsupport_http_requests_total{route=\"%s\",status_code=\"%s\"} %d\n", route, code, atomic.LoadUint64(ptr)))
+		}
+		r.mu.RUnlock()
+		buf.WriteString("\n")
+
+		// 10. HTTP Request Duration Histogram
+		buf.WriteString("# HELP grantsupport_http_request_duration_seconds HTTP request latency distributions in seconds by normalized route.\n")
+		buf.WriteString("# TYPE grantsupport_http_request_duration_seconds histogram\n")
+		r.mu.RLock()
+		for route, hist := range r.requestDurations {
+			hist.mu.Lock()
+			for i, b := range hist.buckets {
+				buf.WriteString(fmt.Sprintf("grantsupport_http_request_duration_seconds_bucket{route=\"%s\",le=\"%g\"} %d\n", route, b, hist.counts[i]))
+			}
+			buf.WriteString(fmt.Sprintf("grantsupport_http_request_duration_seconds_bucket{route=\"%s\",le=\"+Inf\"} %d\n", route, hist.count))
+			buf.WriteString(fmt.Sprintf("grantsupport_http_request_duration_seconds_sum{route=\"%s\"} %.6f\n", route, hist.sum))
+			buf.WriteString(fmt.Sprintf("grantsupport_http_request_duration_seconds_count{route=\"%s\"} %d\n", route, hist.count))
+			hist.mu.Unlock()
 		}
 		r.mu.RUnlock()
 		buf.WriteString("\n")

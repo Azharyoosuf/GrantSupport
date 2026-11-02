@@ -119,7 +119,7 @@ func WriteProblemDetailsError(w http.ResponseWriter, r *http.Request, status int
 		correlationID = r.Header.Get("X-Correlation-ID")
 	}
 	payload := map[string]any{
-		"type":     "https://grantsupport.io/errors/" + strings.ToLower(code),
+		"type":     "urn:grantsupport:error:" + strings.ToLower(code),
 		"title":    code,
 		"status":   status,
 		"detail":   detail,
@@ -129,22 +129,4 @@ func WriteProblemDetailsError(w http.ResponseWriter, r *http.Request, status int
 		payload["correlation_id"] = correlationID
 	}
 	_ = json.NewEncoder(w).Encode(payload)
-}
-
-// WriteRFC7807Error is an alias for WriteProblemDetailsError maintained for backward compatibility.
-func WriteRFC7807Error(w http.ResponseWriter, status int, code, detail string) {
-	WriteProblemDetailsError(w, nil, status, code, detail)
-}
-
-// WriteRFC9457Error is an explicit alias for WriteProblemDetailsError.
-func WriteRFC9457Error(w http.ResponseWriter, r *http.Request, status int, code, detail string) {
-	WriteProblemDetailsError(w, r, status, code, detail)
-}
-
-// getRemoteIP extracts client remote IP safely prioritize Cloudflare headers without trusting raw X-Forwarded-For.
-func getRemoteIP(r *http.Request) string {
-	if cf := r.Header.Get("CF-Connecting-IP"); cf != "" {
-		return cf
-	}
-	return r.RemoteAddr
 }

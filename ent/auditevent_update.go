@@ -24,120 +24,120 @@ type AuditEventUpdate struct {
 }
 
 // Where appends a list predicates to the AuditEventUpdate builder.
-func (aeu *AuditEventUpdate) Where(ps ...predicate.AuditEvent) *AuditEventUpdate {
-	aeu.mutation.Where(ps...)
-	return aeu
+func (_u *AuditEventUpdate) Where(ps ...predicate.AuditEvent) *AuditEventUpdate {
+	_u.mutation.Where(ps...)
+	return _u
 }
 
 // SetInstitutionID sets the "institution_id" field.
-func (aeu *AuditEventUpdate) SetInstitutionID(u uuid.UUID) *AuditEventUpdate {
-	aeu.mutation.SetInstitutionID(u)
-	return aeu
+func (_u *AuditEventUpdate) SetInstitutionID(v uuid.UUID) *AuditEventUpdate {
+	_u.mutation.SetInstitutionID(v)
+	return _u
 }
 
 // SetNillableInstitutionID sets the "institution_id" field if the given value is not nil.
-func (aeu *AuditEventUpdate) SetNillableInstitutionID(u *uuid.UUID) *AuditEventUpdate {
-	if u != nil {
-		aeu.SetInstitutionID(*u)
+func (_u *AuditEventUpdate) SetNillableInstitutionID(v *uuid.UUID) *AuditEventUpdate {
+	if v != nil {
+		_u.SetInstitutionID(*v)
 	}
-	return aeu
+	return _u
 }
 
 // SetActorID sets the "actor_id" field.
-func (aeu *AuditEventUpdate) SetActorID(u uuid.UUID) *AuditEventUpdate {
-	aeu.mutation.SetActorID(u)
-	return aeu
+func (_u *AuditEventUpdate) SetActorID(v uuid.UUID) *AuditEventUpdate {
+	_u.mutation.SetActorID(v)
+	return _u
 }
 
 // SetNillableActorID sets the "actor_id" field if the given value is not nil.
-func (aeu *AuditEventUpdate) SetNillableActorID(u *uuid.UUID) *AuditEventUpdate {
-	if u != nil {
-		aeu.SetActorID(*u)
+func (_u *AuditEventUpdate) SetNillableActorID(v *uuid.UUID) *AuditEventUpdate {
+	if v != nil {
+		_u.SetActorID(*v)
 	}
-	return aeu
+	return _u
 }
 
 // SetEventType sets the "event_type" field.
-func (aeu *AuditEventUpdate) SetEventType(s string) *AuditEventUpdate {
-	aeu.mutation.SetEventType(s)
-	return aeu
+func (_u *AuditEventUpdate) SetEventType(v string) *AuditEventUpdate {
+	_u.mutation.SetEventType(v)
+	return _u
 }
 
 // SetNillableEventType sets the "event_type" field if the given value is not nil.
-func (aeu *AuditEventUpdate) SetNillableEventType(s *string) *AuditEventUpdate {
-	if s != nil {
-		aeu.SetEventType(*s)
+func (_u *AuditEventUpdate) SetNillableEventType(v *string) *AuditEventUpdate {
+	if v != nil {
+		_u.SetEventType(*v)
 	}
-	return aeu
+	return _u
 }
 
 // SetDescription sets the "description" field.
-func (aeu *AuditEventUpdate) SetDescription(s string) *AuditEventUpdate {
-	aeu.mutation.SetDescription(s)
-	return aeu
+func (_u *AuditEventUpdate) SetDescription(v string) *AuditEventUpdate {
+	_u.mutation.SetDescription(v)
+	return _u
 }
 
 // SetNillableDescription sets the "description" field if the given value is not nil.
-func (aeu *AuditEventUpdate) SetNillableDescription(s *string) *AuditEventUpdate {
-	if s != nil {
-		aeu.SetDescription(*s)
+func (_u *AuditEventUpdate) SetNillableDescription(v *string) *AuditEventUpdate {
+	if v != nil {
+		_u.SetDescription(*v)
 	}
-	return aeu
+	return _u
 }
 
 // ClearDescription clears the value of the "description" field.
-func (aeu *AuditEventUpdate) ClearDescription() *AuditEventUpdate {
-	aeu.mutation.ClearDescription()
-	return aeu
+func (_u *AuditEventUpdate) ClearDescription() *AuditEventUpdate {
+	_u.mutation.ClearDescription()
+	return _u
 }
 
 // SetHashChain sets the "hash_chain" field.
-func (aeu *AuditEventUpdate) SetHashChain(s string) *AuditEventUpdate {
-	aeu.mutation.SetHashChain(s)
-	return aeu
+func (_u *AuditEventUpdate) SetHashChain(v string) *AuditEventUpdate {
+	_u.mutation.SetHashChain(v)
+	return _u
 }
 
 // SetNillableHashChain sets the "hash_chain" field if the given value is not nil.
-func (aeu *AuditEventUpdate) SetNillableHashChain(s *string) *AuditEventUpdate {
-	if s != nil {
-		aeu.SetHashChain(*s)
+func (_u *AuditEventUpdate) SetNillableHashChain(v *string) *AuditEventUpdate {
+	if v != nil {
+		_u.SetHashChain(*v)
 	}
-	return aeu
+	return _u
 }
 
 // ClearHashChain clears the value of the "hash_chain" field.
-func (aeu *AuditEventUpdate) ClearHashChain() *AuditEventUpdate {
-	aeu.mutation.ClearHashChain()
-	return aeu
+func (_u *AuditEventUpdate) ClearHashChain() *AuditEventUpdate {
+	_u.mutation.ClearHashChain()
+	return _u
 }
 
 // SetCreatedAt sets the "created_at" field.
-func (aeu *AuditEventUpdate) SetCreatedAt(t time.Time) *AuditEventUpdate {
-	aeu.mutation.SetCreatedAt(t)
-	return aeu
+func (_u *AuditEventUpdate) SetCreatedAt(v time.Time) *AuditEventUpdate {
+	_u.mutation.SetCreatedAt(v)
+	return _u
 }
 
 // SetNillableCreatedAt sets the "created_at" field if the given value is not nil.
-func (aeu *AuditEventUpdate) SetNillableCreatedAt(t *time.Time) *AuditEventUpdate {
-	if t != nil {
-		aeu.SetCreatedAt(*t)
+func (_u *AuditEventUpdate) SetNillableCreatedAt(v *time.Time) *AuditEventUpdate {
+	if v != nil {
+		_u.SetCreatedAt(*v)
 	}
-	return aeu
+	return _u
 }
 
 // Mutation returns the AuditEventMutation object of the builder.
-func (aeu *AuditEventUpdate) Mutation() *AuditEventMutation {
-	return aeu.mutation
+func (_u *AuditEventUpdate) Mutation() *AuditEventMutation {
+	return _u.mutation
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
-func (aeu *AuditEventUpdate) Save(ctx context.Context) (int, error) {
-	return withHooks(ctx, aeu.sqlSave, aeu.mutation, aeu.hooks)
+func (_u *AuditEventUpdate) Save(ctx context.Context) (int, error) {
+	return withHooks(ctx, _u.sqlSave, _u.mutation, _u.hooks)
 }
 
 // SaveX is like Save, but panics if an error occurs.
-func (aeu *AuditEventUpdate) SaveX(ctx context.Context) int {
-	affected, err := aeu.Save(ctx)
+func (_u *AuditEventUpdate) SaveX(ctx context.Context) int {
+	affected, err := _u.Save(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -145,52 +145,52 @@ func (aeu *AuditEventUpdate) SaveX(ctx context.Context) int {
 }
 
 // Exec executes the query.
-func (aeu *AuditEventUpdate) Exec(ctx context.Context) error {
-	_, err := aeu.Save(ctx)
+func (_u *AuditEventUpdate) Exec(ctx context.Context) error {
+	_, err := _u.Save(ctx)
 	return err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (aeu *AuditEventUpdate) ExecX(ctx context.Context) {
-	if err := aeu.Exec(ctx); err != nil {
+func (_u *AuditEventUpdate) ExecX(ctx context.Context) {
+	if err := _u.Exec(ctx); err != nil {
 		panic(err)
 	}
 }
 
-func (aeu *AuditEventUpdate) sqlSave(ctx context.Context) (n int, err error) {
+func (_u *AuditEventUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	_spec := sqlgraph.NewUpdateSpec(auditevent.Table, auditevent.Columns, sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeUUID))
-	if ps := aeu.mutation.predicates; len(ps) > 0 {
+	if ps := _u.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
 				ps[i](selector)
 			}
 		}
 	}
-	if value, ok := aeu.mutation.InstitutionID(); ok {
+	if value, ok := _u.mutation.InstitutionID(); ok {
 		_spec.SetField(auditevent.FieldInstitutionID, field.TypeUUID, value)
 	}
-	if value, ok := aeu.mutation.ActorID(); ok {
+	if value, ok := _u.mutation.ActorID(); ok {
 		_spec.SetField(auditevent.FieldActorID, field.TypeUUID, value)
 	}
-	if value, ok := aeu.mutation.EventType(); ok {
+	if value, ok := _u.mutation.EventType(); ok {
 		_spec.SetField(auditevent.FieldEventType, field.TypeString, value)
 	}
-	if value, ok := aeu.mutation.Description(); ok {
+	if value, ok := _u.mutation.Description(); ok {
 		_spec.SetField(auditevent.FieldDescription, field.TypeString, value)
 	}
-	if aeu.mutation.DescriptionCleared() {
+	if _u.mutation.DescriptionCleared() {
 		_spec.ClearField(auditevent.FieldDescription, field.TypeString)
 	}
-	if value, ok := aeu.mutation.HashChain(); ok {
+	if value, ok := _u.mutation.HashChain(); ok {
 		_spec.SetField(auditevent.FieldHashChain, field.TypeString, value)
 	}
-	if aeu.mutation.HashChainCleared() {
+	if _u.mutation.HashChainCleared() {
 		_spec.ClearField(auditevent.FieldHashChain, field.TypeString)
 	}
-	if value, ok := aeu.mutation.CreatedAt(); ok {
+	if value, ok := _u.mutation.CreatedAt(); ok {
 		_spec.SetField(auditevent.FieldCreatedAt, field.TypeTime, value)
 	}
-	if n, err = sqlgraph.UpdateNodes(ctx, aeu.driver, _spec); err != nil {
+	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{auditevent.Label}
 		} else if sqlgraph.IsConstraintError(err) {
@@ -198,8 +198,8 @@ func (aeu *AuditEventUpdate) sqlSave(ctx context.Context) (n int, err error) {
 		}
 		return 0, err
 	}
-	aeu.mutation.done = true
-	return n, nil
+	_u.mutation.done = true
+	return _node, nil
 }
 
 // AuditEventUpdateOne is the builder for updating a single AuditEvent entity.
@@ -211,127 +211,127 @@ type AuditEventUpdateOne struct {
 }
 
 // SetInstitutionID sets the "institution_id" field.
-func (aeuo *AuditEventUpdateOne) SetInstitutionID(u uuid.UUID) *AuditEventUpdateOne {
-	aeuo.mutation.SetInstitutionID(u)
-	return aeuo
+func (_u *AuditEventUpdateOne) SetInstitutionID(v uuid.UUID) *AuditEventUpdateOne {
+	_u.mutation.SetInstitutionID(v)
+	return _u
 }
 
 // SetNillableInstitutionID sets the "institution_id" field if the given value is not nil.
-func (aeuo *AuditEventUpdateOne) SetNillableInstitutionID(u *uuid.UUID) *AuditEventUpdateOne {
-	if u != nil {
-		aeuo.SetInstitutionID(*u)
+func (_u *AuditEventUpdateOne) SetNillableInstitutionID(v *uuid.UUID) *AuditEventUpdateOne {
+	if v != nil {
+		_u.SetInstitutionID(*v)
 	}
-	return aeuo
+	return _u
 }
 
 // SetActorID sets the "actor_id" field.
-func (aeuo *AuditEventUpdateOne) SetActorID(u uuid.UUID) *AuditEventUpdateOne {
-	aeuo.mutation.SetActorID(u)
-	return aeuo
+func (_u *AuditEventUpdateOne) SetActorID(v uuid.UUID) *AuditEventUpdateOne {
+	_u.mutation.SetActorID(v)
+	return _u
 }
 
 // SetNillableActorID sets the "actor_id" field if the given value is not nil.
-func (aeuo *AuditEventUpdateOne) SetNillableActorID(u *uuid.UUID) *AuditEventUpdateOne {
-	if u != nil {
-		aeuo.SetActorID(*u)
+func (_u *AuditEventUpdateOne) SetNillableActorID(v *uuid.UUID) *AuditEventUpdateOne {
+	if v != nil {
+		_u.SetActorID(*v)
 	}
-	return aeuo
+	return _u
 }
 
 // SetEventType sets the "event_type" field.
-func (aeuo *AuditEventUpdateOne) SetEventType(s string) *AuditEventUpdateOne {
-	aeuo.mutation.SetEventType(s)
-	return aeuo
+func (_u *AuditEventUpdateOne) SetEventType(v string) *AuditEventUpdateOne {
+	_u.mutation.SetEventType(v)
+	return _u
 }
 
 // SetNillableEventType sets the "event_type" field if the given value is not nil.
-func (aeuo *AuditEventUpdateOne) SetNillableEventType(s *string) *AuditEventUpdateOne {
-	if s != nil {
-		aeuo.SetEventType(*s)
+func (_u *AuditEventUpdateOne) SetNillableEventType(v *string) *AuditEventUpdateOne {
+	if v != nil {
+		_u.SetEventType(*v)
 	}
-	return aeuo
+	return _u
 }
 
 // SetDescription sets the "description" field.
-func (aeuo *AuditEventUpdateOne) SetDescription(s string) *AuditEventUpdateOne {
-	aeuo.mutation.SetDescription(s)
-	return aeuo
+func (_u *AuditEventUpdateOne) SetDescription(v string) *AuditEventUpdateOne {
+	_u.mutation.SetDescription(v)
+	return _u
 }
 
 // SetNillableDescription sets the "description" field if the given value is not nil.
-func (aeuo *AuditEventUpdateOne) SetNillableDescription(s *string) *AuditEventUpdateOne {
-	if s != nil {
-		aeuo.SetDescription(*s)
+func (_u *AuditEventUpdateOne) SetNillableDescription(v *string) *AuditEventUpdateOne {
+	if v != nil {
+		_u.SetDescription(*v)
 	}
-	return aeuo
+	return _u
 }
 
 // ClearDescription clears the value of the "description" field.
-func (aeuo *AuditEventUpdateOne) ClearDescription() *AuditEventUpdateOne {
-	aeuo.mutation.ClearDescription()
-	return aeuo
+func (_u *AuditEventUpdateOne) ClearDescription() *AuditEventUpdateOne {
+	_u.mutation.ClearDescription()
+	return _u
 }
 
 // SetHashChain sets the "hash_chain" field.
-func (aeuo *AuditEventUpdateOne) SetHashChain(s string) *AuditEventUpdateOne {
-	aeuo.mutation.SetHashChain(s)
-	return aeuo
+func (_u *AuditEventUpdateOne) SetHashChain(v string) *AuditEventUpdateOne {
+	_u.mutation.SetHashChain(v)
+	return _u
 }
 
 // SetNillableHashChain sets the "hash_chain" field if the given value is not nil.
-func (aeuo *AuditEventUpdateOne) SetNillableHashChain(s *string) *AuditEventUpdateOne {
-	if s != nil {
-		aeuo.SetHashChain(*s)
+func (_u *AuditEventUpdateOne) SetNillableHashChain(v *string) *AuditEventUpdateOne {
+	if v != nil {
+		_u.SetHashChain(*v)
 	}
-	return aeuo
+	return _u
 }
 
 // ClearHashChain clears the value of the "hash_chain" field.
-func (aeuo *AuditEventUpdateOne) ClearHashChain() *AuditEventUpdateOne {
-	aeuo.mutation.ClearHashChain()
-	return aeuo
+func (_u *AuditEventUpdateOne) ClearHashChain() *AuditEventUpdateOne {
+	_u.mutation.ClearHashChain()
+	return _u
 }
 
 // SetCreatedAt sets the "created_at" field.
-func (aeuo *AuditEventUpdateOne) SetCreatedAt(t time.Time) *AuditEventUpdateOne {
-	aeuo.mutation.SetCreatedAt(t)
-	return aeuo
+func (_u *AuditEventUpdateOne) SetCreatedAt(v time.Time) *AuditEventUpdateOne {
+	_u.mutation.SetCreatedAt(v)
+	return _u
 }
 
 // SetNillableCreatedAt sets the "created_at" field if the given value is not nil.
-func (aeuo *AuditEventUpdateOne) SetNillableCreatedAt(t *time.Time) *AuditEventUpdateOne {
-	if t != nil {
-		aeuo.SetCreatedAt(*t)
+func (_u *AuditEventUpdateOne) SetNillableCreatedAt(v *time.Time) *AuditEventUpdateOne {
+	if v != nil {
+		_u.SetCreatedAt(*v)
 	}
-	return aeuo
+	return _u
 }
 
 // Mutation returns the AuditEventMutation object of the builder.
-func (aeuo *AuditEventUpdateOne) Mutation() *AuditEventMutation {
-	return aeuo.mutation
+func (_u *AuditEventUpdateOne) Mutation() *AuditEventMutation {
+	return _u.mutation
 }
 
 // Where appends a list predicates to the AuditEventUpdate builder.
-func (aeuo *AuditEventUpdateOne) Where(ps ...predicate.AuditEvent) *AuditEventUpdateOne {
-	aeuo.mutation.Where(ps...)
-	return aeuo
+func (_u *AuditEventUpdateOne) Where(ps ...predicate.AuditEvent) *AuditEventUpdateOne {
+	_u.mutation.Where(ps...)
+	return _u
 }
 
 // Select allows selecting one or more fields (columns) of the returned entity.
 // The default is selecting all fields defined in the entity schema.
-func (aeuo *AuditEventUpdateOne) Select(field string, fields ...string) *AuditEventUpdateOne {
-	aeuo.fields = append([]string{field}, fields...)
-	return aeuo
+func (_u *AuditEventUpdateOne) Select(field string, fields ...string) *AuditEventUpdateOne {
+	_u.fields = append([]string{field}, fields...)
+	return _u
 }
 
 // Save executes the query and returns the updated AuditEvent entity.
-func (aeuo *AuditEventUpdateOne) Save(ctx context.Context) (*AuditEvent, error) {
-	return withHooks(ctx, aeuo.sqlSave, aeuo.mutation, aeuo.hooks)
+func (_u *AuditEventUpdateOne) Save(ctx context.Context) (*AuditEvent, error) {
+	return withHooks(ctx, _u.sqlSave, _u.mutation, _u.hooks)
 }
 
 // SaveX is like Save, but panics if an error occurs.
-func (aeuo *AuditEventUpdateOne) SaveX(ctx context.Context) *AuditEvent {
-	node, err := aeuo.Save(ctx)
+func (_u *AuditEventUpdateOne) SaveX(ctx context.Context) *AuditEvent {
+	node, err := _u.Save(ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -339,26 +339,26 @@ func (aeuo *AuditEventUpdateOne) SaveX(ctx context.Context) *AuditEvent {
 }
 
 // Exec executes the query on the entity.
-func (aeuo *AuditEventUpdateOne) Exec(ctx context.Context) error {
-	_, err := aeuo.Save(ctx)
+func (_u *AuditEventUpdateOne) Exec(ctx context.Context) error {
+	_, err := _u.Save(ctx)
 	return err
 }
 
 // ExecX is like Exec, but panics if an error occurs.
-func (aeuo *AuditEventUpdateOne) ExecX(ctx context.Context) {
-	if err := aeuo.Exec(ctx); err != nil {
+func (_u *AuditEventUpdateOne) ExecX(ctx context.Context) {
+	if err := _u.Exec(ctx); err != nil {
 		panic(err)
 	}
 }
 
-func (aeuo *AuditEventUpdateOne) sqlSave(ctx context.Context) (_node *AuditEvent, err error) {
+func (_u *AuditEventUpdateOne) sqlSave(ctx context.Context) (_node *AuditEvent, err error) {
 	_spec := sqlgraph.NewUpdateSpec(auditevent.Table, auditevent.Columns, sqlgraph.NewFieldSpec(auditevent.FieldID, field.TypeUUID))
-	id, ok := aeuo.mutation.ID()
+	id, ok := _u.mutation.ID()
 	if !ok {
 		return nil, &ValidationError{Name: "id", err: errors.New(`ent: missing "AuditEvent.id" for update`)}
 	}
 	_spec.Node.ID.Value = id
-	if fields := aeuo.fields; len(fields) > 0 {
+	if fields := _u.fields; len(fields) > 0 {
 		_spec.Node.Columns = make([]string, 0, len(fields))
 		_spec.Node.Columns = append(_spec.Node.Columns, auditevent.FieldID)
 		for _, f := range fields {
@@ -370,41 +370,41 @@ func (aeuo *AuditEventUpdateOne) sqlSave(ctx context.Context) (_node *AuditEvent
 			}
 		}
 	}
-	if ps := aeuo.mutation.predicates; len(ps) > 0 {
+	if ps := _u.mutation.predicates; len(ps) > 0 {
 		_spec.Predicate = func(selector *sql.Selector) {
 			for i := range ps {
 				ps[i](selector)
 			}
 		}
 	}
-	if value, ok := aeuo.mutation.InstitutionID(); ok {
+	if value, ok := _u.mutation.InstitutionID(); ok {
 		_spec.SetField(auditevent.FieldInstitutionID, field.TypeUUID, value)
 	}
-	if value, ok := aeuo.mutation.ActorID(); ok {
+	if value, ok := _u.mutation.ActorID(); ok {
 		_spec.SetField(auditevent.FieldActorID, field.TypeUUID, value)
 	}
-	if value, ok := aeuo.mutation.EventType(); ok {
+	if value, ok := _u.mutation.EventType(); ok {
 		_spec.SetField(auditevent.FieldEventType, field.TypeString, value)
 	}
-	if value, ok := aeuo.mutation.Description(); ok {
+	if value, ok := _u.mutation.Description(); ok {
 		_spec.SetField(auditevent.FieldDescription, field.TypeString, value)
 	}
-	if aeuo.mutation.DescriptionCleared() {
+	if _u.mutation.DescriptionCleared() {
 		_spec.ClearField(auditevent.FieldDescription, field.TypeString)
 	}
-	if value, ok := aeuo.mutation.HashChain(); ok {
+	if value, ok := _u.mutation.HashChain(); ok {
 		_spec.SetField(auditevent.FieldHashChain, field.TypeString, value)
 	}
-	if aeuo.mutation.HashChainCleared() {
+	if _u.mutation.HashChainCleared() {
 		_spec.ClearField(auditevent.FieldHashChain, field.TypeString)
 	}
-	if value, ok := aeuo.mutation.CreatedAt(); ok {
+	if value, ok := _u.mutation.CreatedAt(); ok {
 		_spec.SetField(auditevent.FieldCreatedAt, field.TypeTime, value)
 	}
-	_node = &AuditEvent{config: aeuo.config}
+	_node = &AuditEvent{config: _u.config}
 	_spec.Assign = _node.assignValues
 	_spec.ScanValues = _node.scanValues
-	if err = sqlgraph.UpdateNode(ctx, aeuo.driver, _spec); err != nil {
+	if err = sqlgraph.UpdateNode(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{auditevent.Label}
 		} else if sqlgraph.IsConstraintError(err) {
@@ -412,6 +412,6 @@ func (aeuo *AuditEventUpdateOne) sqlSave(ctx context.Context) (_node *AuditEvent
 		}
 		return nil, err
 	}
-	aeuo.mutation.done = true
+	_u.mutation.done = true
 	return _node, nil
 }

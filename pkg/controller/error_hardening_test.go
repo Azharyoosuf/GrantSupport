@@ -68,9 +68,13 @@ func TestErrorContract_MalformedJSON(t *testing.T) {
 	}
 
 	pd := parseProblemDetails(t, rec)
+	if pd["type"] != "urn:grantsupport:error:invalid_json" {
+		t.Errorf("Expected type 'urn:grantsupport:error:invalid_json', got '%v'", pd["type"])
+	}
 	if pd["title"] != "INVALID_JSON" {
 		t.Errorf("Expected title 'INVALID_JSON', got '%v'", pd["title"])
 	}
+	t.Logf("MalformedJSON ProblemDetails response: %s", rec.Body.String())
 }
 
 // TestErrorContract_ValidationFailure verifies that missing or invalid fields return HTTP 400 VALIDATION_ERROR.
@@ -90,6 +94,9 @@ func TestErrorContract_ValidationFailure(t *testing.T) {
 	}
 
 	pd := parseProblemDetails(t, rec)
+	if pd["type"] != "urn:grantsupport:error:validation_error" {
+		t.Errorf("Expected type 'urn:grantsupport:error:validation_error', got '%v'", pd["type"])
+	}
 	if pd["title"] != "VALIDATION_ERROR" {
 		t.Errorf("Expected title 'VALIDATION_ERROR', got '%v'", pd["title"])
 	}
@@ -325,7 +332,7 @@ func TestErrorContract_RBACForbidden(t *testing.T) {
 // TestErrorContract_SupportLoginInformationDisclosure verifies uniform 401 for invalid, malformed, or missing tokens.
 func TestErrorContract_SupportLoginInformationDisclosure(t *testing.T) {
 	// Create minimal service with nil repo to trigger invalid token format
-	svc := service.NewGrantSupportService(nil, nil, nil)
+	svc := service.NewGrantSupportService(nil, nil)
 	ctrl := controller.NewSupportGrantController(svc)
 	handler := controller.CatchAsync(ctrl.SupportLogin)
 

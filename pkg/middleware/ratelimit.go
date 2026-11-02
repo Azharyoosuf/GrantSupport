@@ -2,57 +2,15 @@ package middleware
 
 import (
 	"fmt"
-	"net"
 	"net/http"
-	"strings"
 	"time"
 
 	"grantsupport/pkg/config"
 	"grantsupport/pkg/controller"
+	"grantsupport/pkg/observability"
 	"grantsupport/pkg/ports"
+	"grantsupport/pkg/security"
 )
-
-// ExtractClientIP extracts the client IP address from a request, stripping ephemeral TCP ports
-// and verifying proxy headers against trusted proxy ranges to prevent IP spoofing.
-func ExtractClientIP(r *http.Request, trustedProxies []string) string {
-	socketHost := r.RemoteAddr
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		socketHost = host
-	}
-	socketHost = strings.TrimSpace(socketHost)
-
-	// If no trusted proxies are configured, or if the direct socket connection is NOT from a trusted proxy,
-	// return the direct socket TCP host to prevent header spoofing.
-	if len(trustedProxies) == 0 || !ValidateIPWhitelist(socketHost, trustedProxies) {
-		return socketHost
-	}
-
-	// Direct socket connection is from a trusted reverse proxy (e.g. Cloudflare / AWS ALB):
-	// Inspect proxy headers in order of priority.
-	if cfIP := strings.TrimSpace(r.Header.Get("CF-Connecting-IP")); cfIP != "" {
-		if net.ParseIP(cfIP) != nil {
-			return cfIP
-		}
-	}
-
-	if xRealIP := strings.TrimSpace(r.Header.Get("X-Real-IP")); xRealIP != "" {
-		if net.ParseIP(xRealIP) != nil {
-			return xRealIP
-		}
-	}
-
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			firstIP := strings.TrimSpace(parts[0])
-			if net.ParseIP(firstIP) != nil {
-				return firstIP
-			}
-		}
-	}
-
-	return socketHost
-}
 
 // RateLimitMiddleware returns an HTTP middleware that throttles requests based on client IP.
 // limit specifies the maximum allowed requests in windowSeconds.
@@ -69,7 +27,7 @@ func RateLimitMiddleware(limiter ports.RateLimiterStore, limit int, windowSecond
 				trustedProxies = config.AppConfig.TrustedProxies
 			}
 
-			clientIP := ExtractClientIP(r, trustedProxies)
+			clientIP := security.ExtractClientIP(r, trustedProxies)
 			key := fmt.Sprintf("ip:%s:%s", clientIP, r.URL.Path)
 
 			allowed, err := limiter.Allow(r.Context(), key, limit, time.Duration(windowSeconds)*time.Second)
@@ -78,6 +36,7 @@ func RateLimitMiddleware(limiter ports.RateLimiterStore, limit int, windowSecond
 				return
 			}
 			if !allowed {
+				observability.DefaultRegistry.IncRateLimitExceeded(NormalizeRoutePattern(r))
 				controller.WriteProblemDetailsError(w, r, http.StatusTooManyRequests, "RATE_LIMIT_EXCEEDED", "Too many requests. Please retry later.")
 				return
 			}
