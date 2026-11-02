@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0-beta.4] - 2026-11-02
+
 ### Breaking changes
 - **HTTP API & Response Payloads**:
   - **Support Login Response Fields (`POST /api/v1/auth/support/login`)**: Removed undocumented duplicate camelCase field `accessToken` and nested `data: { institution_id, access_token }`. The response payload now strictly adheres to `{ "success": true, "message": "...", "institution_id": "...", "access_token": "..." }`.

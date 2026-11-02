@@ -6,8 +6,8 @@ Only the latest release of GrantSupport receives active security updates.
 
 | Version       | Supported          |
 | :---          | :---:              |
-| v0.1.0-beta.3 | :white_check_mark: |
-| < 0.1.0-beta.3| :x:                |
+| v0.1.0-beta.4 | :white_check_mark: |
+| < 0.1.0-beta.4| :x:                |
 
 ---
 

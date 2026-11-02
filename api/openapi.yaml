@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: GrantSupport Engine API
-  version: 0.1.0-beta.3
+  version: 0.1.0-beta.4
   description: >
     GrantSupport is a delegated support-access authentication and cryptographic audit engine.
     It enables multi-tenant SaaS applications to issue cryptographically signed, time-bounded,

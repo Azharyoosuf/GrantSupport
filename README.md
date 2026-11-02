@@ -3,7 +3,7 @@
 **Stop sharing admin passwords with support teams — audited, revocable, time-boxed support access through a standard HTTP API.**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Version: v0.1.0-beta.3](https://img.shields.io/badge/Version-v0.1.0--beta.3-orange.svg)](CHANGELOG.md)
+[![Version: v0.1.0-beta.4](https://img.shields.io/badge/Version-v0.1.0--beta.4-orange.svg)](CHANGELOG.md)
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1.0-green.svg)](api/openapi.yaml)
 [![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](go.mod)
 
@@ -43,7 +43,7 @@ To maintain a strict security boundary and operational simplicity, GrantSupport 
 ## 3. Project Status & Guarantees
 
 * **Status**: Beta / Active Development
-* **Current Release**: `v0.1.0-beta.3`
+* **Current Release**: `v0.1.0-beta.4`
 * **License**: MIT License (`MIT`)
 * **Deployment**: 100% Self-Hosted (No external accounts or cloud dependencies required)
 * **Telemetry**: None (Zero telemetry, zero phone-home, zero heartbeat pings)
@@ -72,11 +72,11 @@ docker compose up -d
 ```bash
 # Liveness probe (process running)
 curl http://localhost:8080/health/live
-# {"service":"GrantSupport Engine","status":"UP","version":"v0.1.0-beta.3"}
+# {"service":"GrantSupport Engine","status":"UP","version":"v0.1.0-beta.4"}
 
 # Deep readiness probe (database and cache connectivity)
 curl http://localhost:8080/health/ready
-# {"database":"UP","mode":"valkey-enabled","status":"READY","valkey":"UP","version":"v0.1.0-beta.3"}
+# {"database":"UP","mode":"valkey-enabled","status":"READY","valkey":"UP","version":"v0.1.0-beta.4"}
 ```
 
 ---
