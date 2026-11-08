@@ -38,6 +38,7 @@ jobs:
           POSTGRES_USER: grantsupport
           POSTGRES_PASSWORD: secretpassword
           POSTGRES_DB: grantsupport
+          POSTGRES_INITDB_ARGS: "-c max_connections=200"
         ports:
           - 5432:5432
         options: >-
