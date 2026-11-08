@@ -5,7 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Version: v0.1.0-beta.4](https://img.shields.io/badge/Version-v0.1.0--beta.4-orange.svg)](CHANGELOG.md)
 [![OpenAPI 3.1](https://img.shields.io/badge/OpenAPI-3.1.0-green.svg)](api/openapi.yaml)
-[![Go Version](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](go.mod)
+[![Go Version](https://img.shields.io/badge/Go-1.26+-00ADD8.svg)](go.mod)
 
 > [!NOTE]
 > **Beta software**: GrantSupport is under active development. APIs, implementation details, and configuration may change before the first stable release.

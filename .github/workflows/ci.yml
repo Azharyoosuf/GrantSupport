@@ -11,16 +11,24 @@ permissions:
 
 jobs:
   lint-and-test:
-    name: Build, Vet, Test & Race Detector Matrix (PG 16 / MySQL ${{ matrix.mysql_version }} / MariaDB ${{ matrix.mariadb_version }})
+    name: Build, Vet, Test & Race Detector Matrix (Go ${{ matrix.go_version }} / PG 16 / MySQL ${{ matrix.mysql_version }} / MariaDB ${{ matrix.mariadb_version }})
     runs-on: ubuntu-latest
 
     strategy:
       fail-fast: false
       matrix:
         include:
-          - mysql_version: "8.4"
+          - go_version: "1.26"
+            mysql_version: "8.4"
             mariadb_version: "11.4"
-          - mysql_version: "8.0"
+          - go_version: "1.26"
+            mysql_version: "8.0"
+            mariadb_version: "10.5"
+          - go_version: "1.27"
+            mysql_version: "8.4"
+            mariadb_version: "11.4"
+          - go_version: "1.27"
+            mysql_version: "8.0"
             mariadb_version: "10.5"
 
     services:
@@ -85,7 +93,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25'
+          go-version: ${{ matrix.go_version }}
           cache: true
 
       - name: Go Formatting Check (gofmt)
