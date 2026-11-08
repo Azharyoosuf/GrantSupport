@@ -38,6 +38,7 @@ jobs:
           POSTGRES_USER: grantsupport
           POSTGRES_PASSWORD: secretpassword
           POSTGRES_DB: grantsupport
+          POSTGRES_INITDB_ARGS: "-c max_connections=200"
         ports:
           - 5432:5432
         options: >-
@@ -128,7 +129,7 @@ jobs:
           TEST_MYSQL_URL: grantsupport:secretpassword@tcp(localhost:3306)/grantsupport?parseTime=true
           TEST_MARIADB_URL: grantsupport:secretpassword@tcp(localhost:3307)/grantsupport?parseTime=true
           VALKEY_CACHE_URL: valkey://localhost:6379/0
-        run: go test -count=1 ./...
+        run: go test -p 1 -count=1 ./...
 
       - name: Race Detection Suite (go test -race)
         env:
@@ -136,7 +137,7 @@ jobs:
           TEST_MYSQL_URL: grantsupport:secretpassword@tcp(localhost:3306)/grantsupport?parseTime=true
           TEST_MARIADB_URL: grantsupport:secretpassword@tcp(localhost:3307)/grantsupport?parseTime=true
           VALKEY_CACHE_URL: valkey://localhost:6379/0
-        run: go test -race -count=1 ./...
+        run: go test -race -p 1 -count=1 ./...
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
