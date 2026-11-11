@@ -7,7 +7,7 @@ This document tracks reference implementations, experimental prototypes, and arc
 ## 1. Merkle Tree Audit Notarization
 
 ### Context
-GrantSupport currently verifies audit trail immutability using **sequential cryptographic hash-chaining** (`gs_audit_events.hash_chain` with SHA-256), where each event cryptographically binds to the previous event's hash in chronological sequence.
+GrantSupport currently verifies audit trails using **sequential cryptographic hash-chaining** (`gs_audit_events.hash_chain` with SHA-256), where each event cryptographically binds to the previous event's hash in chronological sequence, tamper-evident against edits to individual event records. Someone with database write access could recompute the chain, so external checkpointing of the chain head is planned, not yet implemented.
 
 ### Future Capability
 The `CalculateMerkleRoot` and `GenerateMerkleProof` utilities provide binary Merkle tree aggregation and cryptographic inclusion proofs.

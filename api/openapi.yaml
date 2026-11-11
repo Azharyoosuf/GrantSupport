@@ -621,7 +621,7 @@ components:
           example: Support access grant created for duration 60 minutes
         hash_chain:
           type: string
-          description: Sequential SHA-256 hash linking this event immutably to the preceding audit event.
+          description: Sequential SHA-256 hash linking this event to the preceding audit event, tamper-evident against edits to individual event records. Someone with database write access could recompute the chain, so external checkpointing of the chain head is planned, not yet implemented.
           example: 9f83a8b9487c6e12e2057639f28d8442c8d2345e89a1b2c3d4e5f6a7b8c9d0e1
         created_at:
           type: string

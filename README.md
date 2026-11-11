@@ -33,7 +33,7 @@ To maintain a strict security boundary and operational simplicity, GrantSupport 
 
 * **NOT an IAM / Identity Provider**: Does not handle primary user login, passwords, SAML, LDAP, or social OAuth.
 * **NOT a Privileged Access Management (PAM) Platform**: Does not manage bastion hosts, SSH keys, RDP gateways, or Kubernetes cluster credentials.
-* **NOT a Database / API Proxy**: Does not sit in the data path of your database queries or inspect API payload bodies.
+* **NOT a Database / API Proxy**: Does not sit in the data path of your database queries or inspect API payload bodies. GrantSupport sanitises its own audit log. Masking of your own API responses is your application's responsibility.
 * **NOT a Messaging Service**: Does not provide notification channels (email, Slack, SMS, or ticketing systems) for delivering bearer tokens. The host application or administrator is responsible for relaying the single-use token through trusted operational channels.
 * **NOT a Permissions Engine**: Passes the requested `scope` string into the JWT claims; your host application remains responsible for evaluating and enforcing domain permissions.
 * **NOT a Ticketing or Approval Workflow Engine**: Approval or ticketing workflows belong in the host application, which calls `POST /api/v1/auth/support/grant` once a request is approved.
@@ -47,7 +47,7 @@ To maintain a strict security boundary and operational simplicity, GrantSupport 
 * **License**: MIT License (`MIT`)
 * **Deployment**: 100% Self-Hosted (No external accounts or cloud dependencies required)
 * **Telemetry**: None (Zero telemetry, zero phone-home, zero heartbeat pings)
-* **Databases Supported**: PostgreSQL 16+, MySQL 8.0+, MariaDB 10.5+, SQLite 3
+* **Databases Supported**: PostgreSQL 16, MySQL 8.0 and 8.4, MariaDB 10.5 and 11.4, SQLite (pure Go)
 * **Cache Backends Supported**: Valkey 7.2+, Redis 7+, or In-Process SQL Fallback (No Cache Mode)
 * **Primary Integration**: Language-agnostic HTTP REST API
 * **Secondary Integration**: Embedded Go engine (`pkg/grantsupport`)
@@ -150,7 +150,7 @@ go test -v -run "TestRealDatabaseBenchmarks|TestConcurrencyBenchmarks" ./pkg/gra
 * **Cross-Tenant Isolation**: Hard SQL constraints and query scoping ensure Tenant A cannot view, modify, or revoke Tenant B tokens or sessions.
 * **Zero Token Persistence**: Single-use raw bearer tokens are returned exactly once upon creation and stored exclusively as SHA-256 hashes in `gs_support_grants`.
 * **Fail-Closed Verification**: Unknown key IDs (`kid`), expired grants, and tampering fail closed immediately.
-* **Cryptographic Hash Chaining**: Every lifecycle mutation writes an append-only, SHA-256 chained entry into `gs_audit_events`.
+* **Cryptographic Hash Chaining**: Every lifecycle mutation writes an append-only, SHA-256 chained entry into `gs_audit_events`, tamper-evident against edits to individual event records. Someone with database write access could recompute the chain, so external checkpointing of the chain head is planned, not yet implemented.
 * **Token Delivery Boundary**: GrantSupport does not provide a messaging channel for transferring the resulting bearer credential. The host organization is responsible for securely relaying the one-time token through its existing trusted operational channel.
 
 ---

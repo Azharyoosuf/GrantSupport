@@ -63,7 +63,7 @@ GrantSupport operates in two primary deployment topologies:
 ### 2.3 Data Access Layer (`pkg/repository/`)
 * **`SupportGrantRepository`**: Typed CRUD operations over `gs_support_grants` table with strict multi-tenant `institution_id` filtering.
 * **`SecurityAuditRepository`**: Chained append-only audit event logging to `gs_audit_events` with SHA-256 hash chaining and transaction management.
-* **Database Drivers**: Reference support for PostgreSQL 16+ via `jackc/pgx/v5`, MySQL 8.0+ and MariaDB 10.5+ via standard Go relational drivers, and SQLite 3 via pure Go `modernc.org/sqlite`.
+* **Database Drivers**: Reference support for PostgreSQL 16 via `jackc/pgx/v5`, MySQL 8.0 and 8.4 and MariaDB 10.5 and 11.4 via standard Go relational drivers, and SQLite (pure Go) via `modernc.org/sqlite`.
 
 ### 2.4 Capability Adapters (`pkg/adapters/`)
 Implements capability interfaces defined in `pkg/ports/`:
@@ -137,7 +137,7 @@ Event #3 ──► Hash_3 = SHA-256(Hash_2 + Event_3_Data)
 ```
 
 * **Sequential Binding**: Each event record stores `hash_chain`, computed sequentially over the previous event's `hash_chain` and the current event's canonical payload (`SHA-256(prev_hash_chain || event_data)`).
-* **Tamper Verification**: `engine.VerifyAuditChain(ctx, institutionID)` recalculates all hashes chronologically. If any record was altered, deleted, or inserted out of order, verification fails.
+* **Tamper Verification**: `engine.VerifyAuditChain(ctx, institutionID)` recalculates all hashes chronologically. If any record was altered, deleted, or inserted out of order, verification fails. The ledger is tamper-evident against edits to individual event records. Someone with database write access could recompute the chain, so external checkpointing of the chain head is planned, not yet implemented.
 * **Concurrency Protection**: Per-tenant mutex striping ensures concurrent operations within the same tenant do not interleave hash calculations.
 
 ---
