@@ -11,7 +11,7 @@ GrantSupport is designed to provide:
 2. **Dynamic Session Binding**: Ensure support session JWTs cannot outlive the duration explicitly authorized at grant creation time.
 3. **Atomic Consumption**: Ensure a support delegation token can be redeemed exactly once, even under high-concurrency race conditions.
 4. **Instant Revocation**: Allow administrators to immediately terminate active support sessions across distributed nodes.
-5. **Tamper-Evident Auditability**: Maintain an append-only, chronologically chained cryptographic audit log of all grant lifecycle operations.
+5. **Tamper-Evident Auditability**: Maintain an append-only, chronologically chained cryptographic audit log of all grant lifecycle operations, tamper-evident against edits to individual event records.
 6. **Zero-Trust Token Exposure**: Ensure raw support tokens are never persisted in plaintext, never logged, and never reflected in error messages.
 
 ---
@@ -39,7 +39,7 @@ GrantSupport is designed to provide:
 * **Algorithm**: SHA-256.
 * **Chaining Formula**:
   $$\text{Hash}_n = \text{SHA-256}(\text{Hash}_{n-1} \parallel \text{EventData}_n)$$
-* **Verification**: `VerifyAuditChain(ctx, institutionID)` traverses the audit events in ascending chronological order, recomputing the SHA-256 hash chain and confirming no records were deleted, inserted, or altered.
+* **Verification**: `VerifyAuditChain(ctx, institutionID)` traverses the audit events in ascending chronological order, recomputing the SHA-256 hash chain and confirming no records were deleted, inserted, or altered. The chain is tamper-evident against edits to individual event records. Someone with database write access could recompute the chain, so external checkpointing of the chain head is planned, not yet implemented.
 
 ---
 
@@ -53,7 +53,7 @@ GrantSupport is designed to provide:
 | **Malicious Network Access** | Attacker obtains token and attempts redemption from unauthorized IP. | `whitelistedIps` enforcement validates client IP against authorized CIDR/IP list before granting access. |
 | **Revocation Bypass** | Revoked agent attempts requests with an unexpired JWT. | `NewAuthMiddleware` verifies the JWT's `token_version` against the `RevocationStore`. Incremented version immediately rejects requests. |
 | **Revocation Store Outage Bypass** | Attacker causes Redis outage hoping revocation checks fail open. | Fail-closed design: If the `RevocationStore` cannot be queried, the middleware rejects requests with HTTP 503 `REVOCATION_CHECK_UNAVAILABLE`. |
-| **Audit Log Tampering** | Malicious DB administrator deletes or modifies an audit row to hide unauthorized access. | Sequential SHA-256 hash chain breaks. `VerifyAuditChain` immediately identifies the broken link. |
+| **Audit Log Tampering** | Malicious DB administrator deletes or modifies an audit row to hide unauthorized access. | Sequential SHA-256 hash chain breaks; tamper-evident against edits to individual event records. Someone with database write access could recompute the chain, so external checkpointing of the chain head is planned, not yet implemented. |
 | **Error Information Disclosure** | Attacker sends malformed payloads to extract database schemas from error traces. | Problem Details (RFC 9457) error formatting masks all internal driver errors and returns generic sanitized client descriptions. |
 
 ---
@@ -87,7 +87,7 @@ GrantSupport is designed to provide:
 ┌────────────────────────────────────────────────────────────────────────────────────────┐
 │                              STORAGE & COORDINATION LAYER                              │
 │                                                                                        │
-│   - PostgreSQL / MySQL / MariaDB / SQLite (Isolated persistence)                       │
+│   - PostgreSQL 16 / MySQL 8.0 and 8.4 / MariaDB 10.5 and 11.4 / SQLite (pure Go)        │
 │   - Valkey 7.2 / Redis 7 (Distributed locking & token version cache)                   │
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -102,3 +102,4 @@ GrantSupport explicitly does **NOT** provide:
 3. **Network Firewalls / DDoS Mitigation**: While GrantSupport provides an IP rate limiter on `/login`, broad volumetric DDoS mitigation must be handled by upstream reverse proxies or WAFs (e.g. Cloudflare, AWS ALB).
 4. **Public Browser CORS API**: GrantSupport is an internal infrastructure service and does not attach permissive CORS headers.
 5. **Agent Background Checks**: GrantSupport relies on the host application to verify the legitimacy of the `agentId` UUID passed during login.
+6. **Customer Data Masking**: GrantSupport sanitises its own audit log. Masking of your own API responses is your application's responsibility.
